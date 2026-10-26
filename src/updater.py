@@ -138,6 +138,42 @@ def get_latest_release():
         raise RuntimeError(f"Release asset not found: {expected_name}")
     return latest_version, asset
 
+def clean_notes(body, max_lines=25):
+    # release notes are markdown; the console only needs readable text
+    body = re.sub(r"<!--.*?-->", "", body or "", flags=re.S).replace("\r", "")
+    lines = []
+    for line in body.splitlines():
+        line = re.sub(r"^\s{0,3}#{1,6}\s*", "", line.rstrip())
+        line = line.replace("**", "").replace("`", "")
+        if line.strip() or (lines and lines[-1]):
+            lines.append(line)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if len(lines) > max_lines:
+        lines = lines[:max_lines] + ["..."]
+    return lines
+
+def release_notes(installed=VERSION, latest=None):
+    """[(version, [lines])] for every published release newer than `installed`, newest first."""
+    owner, repo = repo_name()
+    releases = json.loads(fetch(f"https://api.github.com/repos/{quote(owner)}/{quote(repo)}/releases?per_page=15"))
+    found = []
+    for release in releases:
+        match = VERSION_PATTERN.fullmatch(str(release.get("tag_name", "")).strip())
+        if not match or release.get("draft") or release.get("prerelease"):
+            continue
+        version = tuple(map(int, match.groups()))
+        if version <= parse_version(installed) or (latest and version > parse_version(latest)):
+            continue
+        found.append((version, ".".join(map(str, version)), clean_notes(release.get("body"))))
+    return [(name, lines) for _, name, lines in sorted(found, reverse=True)]
+
+def print_notes(notes):
+    for name, lines in notes:
+        print(f"\n  v{name}", flush=True)
+        for line in lines or ["(no release notes)"]:
+            print(f"    {line}", flush=True)
+
 def check_update():
     try:
         latest_version, _ = get_latest_release()
@@ -193,6 +229,14 @@ def update(assume_yes=False):
     if parse_version(latest_version) <= parse_version(VERSION):
         print("[UPDATE] Already up to date.", flush=True)
         return False
+
+    if not assume_yes:
+        try:
+            print("\nWhat's new:", flush=True)
+            print_notes(release_notes(VERSION, latest_version))
+            print(flush=True)
+        except Exception:
+            pass                    # notes are a courtesy; never block an update on them
 
     if not (assume_yes or ask(f"Install Blazing Automation {latest_version}? [y/N]: ")):
         print("[UPDATE] Cancelled.", flush=True)
@@ -322,8 +366,17 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="BlazingAutomation updater")
     parser.add_argument("--check", action="store_true", help="Silently check for a newer release")
+    parser.add_argument("--notes", action="store_true", help="Print the release notes of every newer version")
     parser.add_argument("--yes", action="store_true", help="Skip the first install question (the launcher already asked)")
     args = parser.parse_args()
+
+    if args.notes:
+        try:
+            latest, _ = get_latest_release()
+            print_notes(release_notes(VERSION, latest))
+        except Exception:
+            pass
+        raise SystemExit(0)
 
     if args.check:
         # prints the newer version if there is one; exit code 1 means GitHub could not be reached

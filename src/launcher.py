@@ -11,15 +11,13 @@ SRC = Path(__file__).resolve().parent
 APP = SRC.parent
 sys.path.insert(0, str(SRC))
 
-from api import ui                      # noqa: E402
-from config import VERSION              # noqa: E402
+from api import ui, devices 
+from config import VERSION  
 
 STATE_FILE = APP / ".launcher.json"
 SETUP = APP / "scripts" / "setup.ps1"
 POWERSHELL = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(SETUP)]
 DEV_TOOLS = [("Live coordinate picker", "coordinates.py"), ("Live raw OCR stream", "ocr.py"), ("Button test", "toggles.py")]
-
-# ---------------------------------------------------------------- helpers
 
 def load_state():
     try:
@@ -31,7 +29,7 @@ def save_state(state):
     try:
         STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
     except OSError:
-        pass                            # a read-only install should not stop anyone running a macro
+        pass                     
 
 def pretty(name):
     return name.replace("_", " ").title()
@@ -79,8 +77,6 @@ def positive_int(text):
         return "Enter a whole number above 0, or leave it blank"
     return None
 
-# ---------------------------------------------------------------- updates (checked in the background)
-
 class UpdateCheck:
     def __init__(self):
         self.version, self.done = "", False
@@ -99,6 +95,15 @@ def latest_version():
     lines = result.stdout.strip().splitlines()
     return (lines[-1].strip() if lines else ""), result.returncode == 0
 
+def release_notes():
+    try:
+        result = subprocess.run([sys.executable, "-u", str(SRC / "updater.py"), "--notes"],
+                                capture_output=True, text=True, timeout=25)
+    except Exception:
+        return []
+    lines = result.stdout.rstrip().splitlines()
+    return lines[:60] + (["    ..."] if len(lines) > 60 else [])
+
 def check_updates():
     ui.clear()
     ui.say("Checking for updates...", "gray")
@@ -112,8 +117,14 @@ def check_updates():
             ui.say("Could not reach GitHub. Check your internet connection and try again.", "red")
         ui.pause()
         return False
-    if not ui.confirm(f"Version {version} is available", yes=f"Install v{version}", no="Not now",
-                      detail=f"You have v{VERSION}"):
+    notes = release_notes()
+    if notes:
+        ui.header(f"Version {version} is available", f"You have v{VERSION}. What's new:")
+        for line in notes:
+            ui.say(line, "gray")
+        print()
+    if not ui.confirm(f"Install v{version}?", yes=f"Install v{version}", no="Not now",
+                      detail="" if notes else f"You have v{VERSION}"):
         return False
     ui.clear()
     code = python(SRC / "updater.py", "--yes")
@@ -125,8 +136,6 @@ def check_updates():
         ui.say(f"Update failed (exit code {code}).", "red")
     ui.pause()
     return False
-
-# ---------------------------------------------------------------- screens
 
 def pick_options(name, info, remembered):
     args, chosen = [], {}
@@ -155,7 +164,7 @@ def pick_options(name, info, remembered):
                 args += [flag, value]
             chosen[flag] = value
 
-    if info["counts"]:                  # only macros that count runs can stop after N
+    if info["counts"]:     
         ui.clear()
         ui.header(f"{pretty(name)}: repeat count")
         times = ui.ask("Repeat count (blank = until you stop it)", "", positive_int)
@@ -164,6 +173,9 @@ def pick_options(name, info, remembered):
     return args, chosen
 
 def start_macro(name, state):
+    env = prepare_device(state)
+    if env is None:
+        return
     ui.clear()
     ui.say("Loading...", "gray")
     try:
@@ -191,7 +203,7 @@ def start_macro(name, state):
     ui.clear()
     ui.header(f"Running {pretty(name)}", "Press Ctrl+C to stop")
     print()
-    code = python(SRC / "main.py", *command)
+    code = python(SRC / "main.py", *command, env=env)
     print()
     if code == 0:
         ui.say(f"{pretty(name)} finished.", "green")
@@ -215,7 +227,7 @@ def dev_ready():
     probe = "import tkinter; from PIL import Image, ImageTk"
     return subprocess.run([sys.executable, "-c", probe], capture_output=True).returncode == 0
 
-def developer():
+def developer(state):
     if not dev_ready():
         if not ui.confirm("Developer tools need one more download", yes="Download now", no="Back",
                           detail="Installs Pillow (small). Needs an internet connection."):
@@ -229,9 +241,12 @@ def developer():
         pick = ui.choose("Developer", [label for label, _ in DEV_TOOLS], subtitle="Tools for coordinates, OCR text and button tests")
         if pick is None:
             return
+        env = prepare_device(state)
+        if env is None:
+            continue
         ui.clear()
         # the dev tools import "src.api...", so the folder above src must be on the path
-        code = python(SRC / "dev" / DEV_TOOLS[pick][1], env={**os.environ, "PYTHONPATH": str(APP)})
+        code = python(SRC / "dev" / DEV_TOOLS[pick][1], env={**env, "PYTHONPATH": str(APP)})
         if code:
             ui.say(f"Tool exited with code {code}.", "red")
             ui.pause()
@@ -257,19 +272,119 @@ def valid_device(text):
         return "Use the form address:port, for example 127.0.0.1:5555"
     return None
 
+def device_label(state):
+    mode = state.get("device_mode") or "emulator"
+    return "Android Phone" if mode == "phone" else "Emulator"
+
+def ask_device(state):
+    stop = False
+    default = 1 if state.get("device_mode") == "phone" else 0
+    while True:
+        ui.clear()
+        pick = ui.choose("Where is the game running?",
+                         ["Emulator", "Android Phone", f"[{'x' if stop else ''}] Stop asking (You can change this later.)"],
+                         default=default, subtitle="Pick one to start, or tick the box first to remember the choice")
+        if pick is None:
+            return False
+        if pick == 2:
+            stop, default = not stop, 2
+            continue
+        break
+    state["device_mode"] = "phone" if pick == 1 else "emulator"
+    if stop:
+        state["ask_device"] = False
+    if pick == 0 and "device" not in state:         # first time with an emulator: which address
+        set_emulator_address(state)
+    save_state(state)
+    return True
+
+def set_emulator_address(state):
+    ui.clear()
+    ui.header("Emulator address", "Usually 127.0.0.1:5555 (BlueStacks) or 127.0.0.1:16384 (MuMu 12). See your emulator's settings")
+    value = ui.ask("ADB address", state.get("device") or DEFAULT_DEVICE, valid_device)
+    state["device"] = "" if value == DEFAULT_DEVICE else value
+    save_state(state)
+
+def find_phone(state):
+    """(name, ip:port) of the phone to use, asking when several are around. None when there is none."""
+    found = devices.phones()
+    if not found:
+        return None
+    saved = [item for item in found if devices.serial_of(item[0]) == state.get("phone")]
+    if saved:
+        return saved[0]
+    if len(found) == 1:
+        return found[0]
+    pick = ui.choose("Which phone?", [f"{devices.serial_of(name)}  {address}" for name, address in found])
+    return None if pick is None else found[pick]
+
+def prepare_device(state):
+    if not state.get("device_mode") and state.get("device") is not None:
+        state["device_mode"] = "emulator"       
+    if state.get("ask_device", True) or not state.get("device_mode"):
+        if not ask_device(state):
+            return None
+    if state["device_mode"] != "phone":
+        return dict(os.environ)
+    ui.clear()
+    ui.say("Looking for your phone...", "gray")
+    found = find_phone(state)
+    if not found:
+        ui.say("No Android phone found.", "red")
+        ui.say("Turn on Wireless debugging on the phone, on the same Wi-Fi as this PC.", "gray")
+        ui.say("Not paired yet? Settings > Pair a new phone.   Using an emulator? Pick Emulator when asked.", "gray")
+        ui.pause()
+        return None
+    state["phone"] = devices.serial_of(found[0])
+    save_state(state)
+    ui.say(f"Phone found at {found[1]}", "green")
+    return {**os.environ, "BLAZING_DEVICE": found[1]}
+
+def pair_phone():
+    ui.clear()
+    ui.header("Pair a new phone", "Only needed once per phone")
+    ui.say("On the phone: Settings > Developer options > Wireless debugging > Pair device with pairing code.", "gray")
+    ui.say("Leave that pairing screen open.", "gray")
+    ui.say("")
+    ui.say("Looking for the pairing screen...", "gray")
+    found = devices.wait_for("pairing", 25)
+    if found:
+        address = found[0][1]
+        ui.say(f"Found it at {address}", "green")
+    else:
+        ui.say("Could not find it automatically.", "yellow")
+        address = ui.ask("Pairing address shown on the phone (ip:port, blank to cancel)", "", valid_device)
+        if not address:
+            return
+    code = ui.ask("Pairing code (6 digits, blank to cancel)", "")
+    if not code:
+        return
+    ok, message = devices.pair(address, code)
+    ui.say(message or ("Paired." if ok else "Pairing failed."), "green" if ok else "red")
+    if ok:
+        ui.say("Done. Pick Android Phone the next time you start something.", "gray")
+    ui.pause()
+
 def settings(state):
     while True:
+        asking = state.get("ask_device", True)
         pick = ui.choose("Settings", [f"Verbose log: {'on' if state.get('verbose') else 'off'}",
-                                      f"ADB address: {state.get('device') or DEFAULT_DEVICE}", "Back"],
-                         subtitle="Verbose shows OCR text and tap coordinates. The ADB address is your emulator or phone")
+                                      f"Ask which device to use: {'yes' if asking else 'no'}",
+                                      f"Device when not asking: {device_label(state)}",
+                                      f"Emulator address: {state.get('device') or DEFAULT_DEVICE}",
+                                      "Pair a new phone", "Back"],
+                         subtitle="Verbose shows OCR text and tap coordinates")
         if pick == 0:
             state["verbose"] = not state.get("verbose")
             ui.set_verbose(state["verbose"])
         elif pick == 1:
-            ui.clear()
-            ui.header("ADB address", "Emulator: usually 127.0.0.1:5555 (check its settings). Phone: ip:port from Wireless debugging")
-            value = ui.ask("ADB address (blank = " + DEFAULT_DEVICE + ")", state.get("device") or DEFAULT_DEVICE, valid_device)
-            state["device"] = "" if value == DEFAULT_DEVICE else value
+            state["ask_device"] = not asking
+        elif pick == 2:
+            state["device_mode"] = "emulator" if state.get("device_mode") == "phone" else "phone"
+        elif pick == 3:
+            set_emulator_address(state)
+        elif pick == 4:
+            pair_phone()
         else:
             return
         save_state(state)
@@ -303,7 +418,7 @@ def main():
         if pick == 0:
             run_macros(state)
         elif pick == 1:
-            developer()
+            developer(state)
         elif pick == 2:
             if check_updates():
                 return 0

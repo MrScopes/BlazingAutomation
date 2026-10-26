@@ -27,15 +27,30 @@ ADB = shutil.which("adb") or "adb"
 
 DEFAULT_DEVICE = "127.0.0.1:5555"
 
-def _saved_device():
-    # the launcher's Settings > ADB address (stored next to the other launcher settings)
+def _settings():
+    # the launcher's Settings (stored next to .setup.json)
     try:
-        value = json.loads((APP_ROOT.parent / ".launcher.json").read_text(encoding="utf-8")).get("device")
-        return value.strip() if isinstance(value, str) and value.strip() else None
+        return json.loads((APP_ROOT.parent / ".launcher.json").read_text(encoding="utf-8"))
     except Exception:
-        return None
+        return {}
 
-DEVICE = os.environ.get("BLAZING_DEVICE") or _saved_device() or DEFAULT_DEVICE
+def _device():
+    # the launcher looks up a phone itself and passes the result in BLAZING_DEVICE
+    if os.environ.get("BLAZING_DEVICE"):
+        return os.environ["BLAZING_DEVICE"]
+    saved = _settings()
+    if saved.get("device_mode") == "phone":
+        from .devices import resolve_phone, serial_of
+        found = resolve_phone(saved.get("phone"))
+        if not found:
+            raise RuntimeError("No Android phone found. Turn on Wireless debugging on the phone (same Wi-Fi as this PC). "
+                               "Not paired yet? Run.bat > Settings > Pair a new phone")
+        print(f"[DEVICE] Phone {serial_of(found[0])} at {found[1]}", flush=True)
+        return found[1]
+    value = saved.get("device")
+    return value.strip() if isinstance(value, str) and value.strip() else DEFAULT_DEVICE
+
+DEVICE = _device()
 REFERENCE_W = 1131
 REFERENCE_H = 2011
 # Leave None to detect the game area on screen. If detection is ever wrong, set it by hand:

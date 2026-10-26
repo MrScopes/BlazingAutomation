@@ -35,8 +35,7 @@ You must enable ADB. **BlueStacks Settings -> Advanced -> Android Debug Bridge**
 works out the box
 
 # Android Phone
-Currently, there is no IP or port discovery for wireless or wired debugging Android phones, but it does work. In developer settings on the phone, you can find the IP and Port.\
-To change the IP and port our program uses, **Run.bat -> Settings -> ADB address: ...**.
+you must enable debugging in developer options in the phone, then you can select android phone as an option to run the macros on
 
 ## Uninstall
 You can simply delete the folder. Nothing is permanently installed, and everything is local to the folder.
