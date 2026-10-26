@@ -20,12 +20,6 @@ The first run sets everything up for you (Python, OCR, scrcpy, ADB and FFmpeg). 
 ## Uninstall
 You can simply delete the folder. Nothing is permanently installed, and everything is local to the folder.
 
-## Set up your emulator
-
-1. Turn on ADB in your emulator's settings.
-2. Set the game to portrait and keep it on screen while a macro runs.
-3. Make sure the ADB address in `app/src/api/config.py` (`DEVICE`) matches your emulator.
-
 ## Use it
 
 1. Open the game.
