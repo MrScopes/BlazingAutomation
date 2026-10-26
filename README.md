@@ -12,6 +12,7 @@ Current behavior:
 
 Macros can be started on any screen but they will fail for example if you start infinite macro and you're in ninja road, or if you try to have it
 navigate on the home screen, but it's not started where "Story&Gaiden" is the mode in the middle. Updates will be pushed to make these less fragile.
+Macros can be started mid mission as well though, for example you're playing Ninja Road, and enable the macro; now it will play it for you and keep going.
 **Currently, all macros default to auto on and auto jutsu on.**
 
 ## Heads up
@@ -64,6 +65,30 @@ Your settings are kept.
 - Macro says a package is missing or setup is incomplete: pick **Reinstall**.
 - Macro stalls on a screen: turn on **Settings > Verbose log**, run it again and check what the OCR is reading.
 - If a macro fails it saves a screenshot next to the app so you can see where it got stuck.
+
+## Development
+Feel free to make PRs. The easiest way to test your local changes is to clone the repo, and you can run the included:
+```
+PS ...> ./bundle
+[BUILD] Installer prepared: ... (version ...)
+[ZIP] Created ...\blazingautomation-...zip                            
+
+Press Enter to launch Run.bat (or Q to quit): 
+
+  BLAZING AUTOMATION  v...
+  --------------------------
+
+  > 1. Run Macros
+    2. Developer
+    3. Check For Updates
+    4. Reinstall
+    5. Settings
+    6. Quit
+
+  up/down to move   enter to pick   q to quit
+```
+The bundler does all the work for you of making the folder for you, your local 'dist' folder. 
+It will install deps here just like the end user, so it'll take a minute for the first run.
 
 ## AI Disclosure
 I wrote this with AI assistance. I design and test everything myself, but some of the code was AI generated.
