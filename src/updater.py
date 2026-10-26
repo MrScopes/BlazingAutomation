@@ -25,7 +25,7 @@ LAUNCHERS = {"Run.bat"}
 OLD_LAUNCHERS = {"Install.bat", "Developer.bat"}        # replaced by the launcher menu; offered for deletion
 IGNORED_DIRS = {"__pycache__", ".git", ".venv", ".runtime", ".bootstrap", ".cache", "tools", "models"}
 IGNORED_SUFFIXES = {".pyc", ".pyo", ".log", ".tmp", ".bak"}
-IGNORED_FILES = {".setup.json", "desktop.ini", "thumbs.db"}
+IGNORED_FILES = {".setup.json", ".layout.json", "desktop.ini", "thumbs.db"}
 
 def fetch(url):
     req = Request(url, headers={
@@ -104,6 +104,19 @@ def version_from_zip(zf, files):
         if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "VERSION" for target in node.targets):
             return ast.literal_eval(node.value)
     raise ValueError("Release config.py has no VERSION")
+
+def read_constant(source, name, default=None):
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == name for target in node.targets):
+            return ast.literal_eval(node.value)
+    return default
+
+def installed_setup_revision():
+    # installs from before revisions existed count as revision 1
+    try:
+        return int(json.loads((APP / ".setup.json").read_text(encoding="utf-8-sig")).get("revision", 1))
+    except Exception:
+        return 1
 
 def get_latest_release():
     owner, repo = repo_name()
@@ -292,6 +305,13 @@ def update(assume_yes=False):
             if errors:
                 raise RuntimeError("Rollback incomplete:\n" + "\n".join(errors))
             raise
+
+        needs_setup = read_constant((staged / "app/src/config.py").read_text(encoding="utf-8-sig"), "SETUP_REVISION", 1) > installed_setup_revision()
+
+    if needs_setup:
+        # no .setup.json makes Run.bat run setup before the menu; it only installs what is missing
+        (APP / ".setup.json").unlink(missing_ok=True)
+        print("\n[UPDATE] This update needs a setup refresh. It runs the next time you open Run.bat.", flush=True)
 
     print(f"\n[UPDATE] Installed {latest_version}. Restart the application.", flush=True)
     print("[UPDATE] Runtime, models, dependencies and ignored files were preserved.", flush=True)

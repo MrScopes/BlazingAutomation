@@ -1,4 +1,5 @@
 import time
+from api.common.layout import ANCHORS
 
 class Actions:
     def __init__(self, driver, points, double_tap=()):
@@ -19,7 +20,7 @@ class Actions:
         if name not in self.points or self.points[name] is None:
             raise RuntimeError(f"Point {name!r} is not defined; add it to the macro's points")
         method = self.driver.doubletap if name in self.double_tap else self.driver.tap
-        method(self.points[name])
+        method(self.points[name], **({"anchor": ANCHORS[name]} if name in ANCHORS else {}))
         stamp = time.monotonic()
         self.last[key] = stamp
         self.global_at = stamp

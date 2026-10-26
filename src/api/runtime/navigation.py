@@ -1,4 +1,6 @@
 class HomeNavigation:
+    AWAY_RESET = 5.0     # seconds of unrecognised screens after which Home selection starts over
+
     def __init__(self, steps, destination, retry_seconds=8.0):
         self.steps = tuple(steps)
         self.destination = set(destination if isinstance(destination, (tuple, list, set)) else (destination,))
@@ -9,14 +11,24 @@ class HomeNavigation:
         self.index = 0
         self.last_tap = None
         self.waiting_since = None
+        self.away_since = None
 
     def handle(self, engine, screen, now):
         if screen in self.destination:
             self.reset()
             return False
+        if screen == 'unknown':
+            # a carousel sliding or a screen fading: not a reason to forget which steps are done
+            if self.away_since is None:
+                self.away_since = now
+            return False
         if screen != 'home':
             self.reset()
             return False
+        if self.away_since is not None:
+            away, self.away_since = now - self.away_since, None
+            if away > self.AWAY_RESET:
+                self.reset()
         if not self.steps:
             return False
         if self.waiting_since is not None:

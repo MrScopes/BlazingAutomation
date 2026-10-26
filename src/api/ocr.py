@@ -33,4 +33,24 @@ class OCR:
         return " ".join(str(value) for value in (getattr(result, "txts", None) or []))
 
     def read(self, frame):
-        return self.text(self.detect(frame))
+        result = self.detect(frame)
+        self.items = self.boxes(result, frame)
+        return self.text(result)
+
+    @staticmethod
+    def boxes(result, frame):
+        h, w = frame.shape[:2]
+        scale = min(1.0, 1500 / max(h, w))
+        texts = getattr(result, "txts", None) or ()
+        boxes = getattr(result, "boxes", None)
+        items = []
+        if boxes is None:
+            return items
+        for text, box in zip(texts, boxes):
+            try:
+                xs = [float(point[0]) for point in box]
+                ys = [float(point[1]) for point in box]
+                items.append((str(text), sum(xs) / len(xs) / scale, sum(ys) / len(ys) / scale))
+            except Exception:
+                continue
+        return items

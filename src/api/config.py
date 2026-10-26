@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import os
 import sys
 import shutil
@@ -23,9 +24,23 @@ def _configure_external_tools():
 
 _configure_external_tools()
 ADB = shutil.which("adb") or "adb"
-DEVICE = "192.168.1.118:5555"
+
+DEFAULT_DEVICE = "127.0.0.1:5555"
+
+def _saved_device():
+    # the launcher's Settings > ADB address (stored next to the other launcher settings)
+    try:
+        value = json.loads((APP_ROOT.parent / ".launcher.json").read_text(encoding="utf-8")).get("device")
+        return value.strip() if isinstance(value, str) and value.strip() else None
+    except Exception:
+        return None
+
+DEVICE = os.environ.get("BLAZING_DEVICE") or _saved_device() or DEFAULT_DEVICE
 REFERENCE_W = 1131
 REFERENCE_H = 2011
+# Leave None to detect the game area on screen. If detection is ever wrong, set it by hand:
+# (left, top, width, height) in device pixels, e.g. (0, 129, 1440, 2991)
+GAME_REGION = None
 
 def adb(*args, timeout=30):
     return subprocess.run(
@@ -49,3 +64,4 @@ def reconnect():
     result = adb("get-state")
     if result.returncode != 0:
         raise RuntimeError("ADB device unavailable")
+    

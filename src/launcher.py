@@ -249,14 +249,29 @@ def reinstall():
         ui.say(f"Reinstall failed (exit code {code}).", "red")
     ui.pause()
 
+DEFAULT_DEVICE = "127.0.0.1:5555"          # same default as api/config.py
+
+def valid_device(text):
+    host, _, port = text.rpartition(":")
+    if text and (not host or not port.isdigit() or not 0 < int(port) < 65536 or " " in text):
+        return "Use the form address:port, for example 127.0.0.1:5555"
+    return None
+
 def settings(state):
     while True:
-        pick = ui.choose("Settings", [f"Verbose log: {'on' if state.get('verbose') else 'off'}", "Back"],
-                         subtitle="Verbose shows OCR text and tap coordinates")
-        if pick != 0:
+        pick = ui.choose("Settings", [f"Verbose log: {'on' if state.get('verbose') else 'off'}",
+                                      f"ADB address: {state.get('device') or DEFAULT_DEVICE}", "Back"],
+                         subtitle="Verbose shows OCR text and tap coordinates. The ADB address is your emulator or phone")
+        if pick == 0:
+            state["verbose"] = not state.get("verbose")
+            ui.set_verbose(state["verbose"])
+        elif pick == 1:
+            ui.clear()
+            ui.header("ADB address", "Emulator: usually 127.0.0.1:5555 (check its settings). Phone: ip:port from Wireless debugging")
+            value = ui.ask("ADB address (blank = " + DEFAULT_DEVICE + ")", state.get("device") or DEFAULT_DEVICE, valid_device)
+            state["device"] = "" if value == DEFAULT_DEVICE else value
+        else:
             return
-        state["verbose"] = not state.get("verbose")
-        ui.set_verbose(state["verbose"])
         save_state(state)
 
 # ---------------------------------------------------------------- main menu

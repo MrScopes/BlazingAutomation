@@ -3,6 +3,8 @@ import struct
 import cv2
 import numpy as np
 from .config import APP_ROOT, REFERENCE_W, REFERENCE_H, adb, reconnect
+from .common.layout import to_pixels, calibrate
+from .macro import display_args
 from .capture import ScrcpyWindowCapture, ScrcpyHeadlessCapture
 from .ocr import OCR
 
@@ -15,11 +17,14 @@ class Driver:
         self.raw_fallbacks = 0
         self.live = None
         self.live_failed = False
-        self.width = REFERENCE_W
+        self.width = REFERENCE_W            # size of the game area (what macros see)
         self.height = REFERENCE_H
+        self.origin = (0, 0)                # where the game area starts on the display
+        self.screen_size = None             # the whole display, as the screenshot sees it
+        self.region = None
 
     def capture_png(self, display):
-        result = adb("exec-out", "screencap", "-d", display, "-p")
+        result = adb("exec-out", "screencap", *display_args(display), "-p")
         signature = b"\x89PNG\r\n\x1a\n"
         offset = result.stdout.find(signature)
         if result.returncode != 0 or offset < 0:
@@ -30,7 +35,7 @@ class Driver:
         return frame
 
     def capture_raw(self, display):
-        result = adb("exec-out", "screencap", "-d", display)
+        result = adb("exec-out", "screencap", *display_args(display))
         if result.returncode != 0:
             raise RuntimeError("Raw screenshot failed: " + result.stderr.decode(errors="replace"))
         data = result.stdout
@@ -79,29 +84,41 @@ class Driver:
         self.display_id = selected.physical_id
         self.capture_port = selected.port
         frame = self.capture(self.display_id)
-        self.height, self.width = frame.shape[:2]
-        if selected.size and (self.width, self.height) != selected.size:
-            raise RuntimeError(
-                f"Game viewport reports {selected.size}, but screenshot is "
-                f"{self.width}x{self.height}"
-            )
+        shot_h, shot_w = frame.shape[:2]
+        self.screen_size = (shot_w, shot_h)
+        from .display import game_region
+        self.region, source = game_region(selected.frame, selected.size, shot_w, shot_h)
+        left, top, self.width, self.height = self.region
+        self.origin = (left, top)
         print(f"[GAME] Input display {self.input_display}; screenshot display "
               f"{self.display_id}; scrcpy port {self.capture_port}; "
-              f"{self.width}x{self.height}", flush=True)
+              f"screen {shot_w}x{shot_h}; game area {self.width}x{self.height} at ({left}, {top}) [{source}]",
+              flush=True)
         return frame
+
+    def crop(self, frame):
+        # screenshots and live video cover the whole display; macros only see the game area
+        if self.region is None or self.screen_size is None:
+            return frame
+        if (frame.shape[1], frame.shape[0]) != self.screen_size:
+            return frame
+        left, top, width, height = self.region
+        if (left, top, width, height) == (0, 0, frame.shape[1], frame.shape[0]):
+            return frame
+        return frame[top:top + height, left:left + width]
 
     def screen(self):
         start = time.monotonic()
 
-        if self.display_id is None:
+        if self.input_display is None:
             frame = self.find_display()
         else:
             if self.capture_mode in ("scrcpy", "headless") and not self.live_failed:
                 if self.live is None:
                     try:
-                        live = (ScrcpyHeadlessCapture(self.width, self.height, display_id=self.input_display)
+                        live = (ScrcpyHeadlessCapture(*self.screen_size, display_id=self.input_display)
                                 if self.capture_mode == "headless"
-                                else ScrcpyWindowCapture(self.width, self.height, display_id=self.input_display))
+                                else ScrcpyWindowCapture(*self.screen_size, display_id=self.input_display))
                         live.start()
                         test = live.get()
                         test_text = self.ocr(test).lower()
@@ -131,11 +148,16 @@ class Driver:
                 frame = self.capture(self.display_id)
 
         capture_time = time.monotonic() - start
+        frame = self.crop(frame)
         self.height, self.width = frame.shape[:2]
 
         start_ocr = time.monotonic()
         raw = self.ocr(frame)
         ocr_time = time.monotonic() - start_ocr
+
+        measured = calibrate(getattr(self.reader, "items", ()), self.width, self.height)
+        if measured is not None:
+            print(f"[LAYOUT] Screen margin measured from the game's own buttons: {measured:.0f}px", flush=True)
 
         if getattr(self, "debug_scans", False):
             print(
@@ -146,33 +168,31 @@ class Driver:
 
         return frame, raw
 
-    def tap(self, point, silent=False, reference=True):
+    def tap(self, point, silent=False, reference=True, anchor=None):
         if self.input_display is None:
             self.find_display()
         from .macro import send_taps
-        send_taps(self.input_display, point, (self.width, self.height) if reference else None, 1, silent)
+        send_taps(self.input_display, point, (self.width, self.height) if reference else None, 1, silent, origin=self.origin, anchor=anchor)
 
-    def doubletap(self, point, silent=False, reference=True, delay_ms=150):
+    def doubletap(self, point, silent=False, reference=True, delay_ms=150, anchor=None):
         if self.input_display is None:
             self.find_display()
         from .macro import send_taps
-        send_taps(self.input_display, point, (self.width, self.height) if reference else None, 2, silent, delay_ms)
+        send_taps(self.input_display, point, (self.width, self.height) if reference else None, 2, silent, delay_ms, origin=self.origin, anchor=anchor)
 
     def swipe(self, start, end, duration_ms=300, silent=False, reference=True):
         if self.input_display is None:
             self.find_display()
 
         if reference:
-            sx = round(start[0] * self.width / REFERENCE_W)
-            sy = round(start[1] * self.height / REFERENCE_H)
-            ex = round(end[0] * self.width / REFERENCE_W)
-            ey = round(end[1] * self.height / REFERENCE_H)
+            sx, sy = (round(v + o) for v, o in zip(to_pixels(start, self.width, self.height), self.origin))
+            ex, ey = (round(v + o) for v, o in zip(to_pixels(end, self.width, self.height), self.origin))
         else:
             sx, sy = start
             ex, ey = end
 
         result = adb(
-            "shell", "input", "-d", self.input_display,
+            "shell", "input", *display_args(self.input_display),
             "swipe", sx, sy, ex, ey, max(1, int(duration_ms)),
         )
 

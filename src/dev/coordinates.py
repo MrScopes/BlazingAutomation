@@ -4,27 +4,38 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
-from src.api.config import adb, reconnect, DEVICE, REFERENCE_W, REFERENCE_H
-from src.api.display import resolve_game_display
+from src.api.config import adb, reconnect, DEVICE
+from src.api.display import resolve_game_display, game_region
+from src.api.common.layout import to_reference
 
 PNG = b'\x89PNG\r\n\x1a\n'
 
 def screenshot(display_id):
-    result = adb('exec-out', 'screencap', '-d', str(display_id), '-p', timeout=25)
+    flag = [] if str(display_id) in ('', '0', 'None') else ['-d', str(display_id)]
+    result = adb('exec-out', 'screencap', *flag, '-p', timeout=25)
     start = result.stdout.find(PNG)
     if result.returncode or start < 0:
         raise RuntimeError('Screenshot failed: ' + result.stderr.decode(errors='replace')[:200])
     with Image.open(io.BytesIO(result.stdout[start:])) as image:
         return image.convert('RGB')
 
+def crop(image, region):
+    left, top, width, height = region
+    if (left, top, width, height) == (0, 0, image.width, image.height) or (image.width, image.height) != SCREEN.get('size'):
+        return image
+    return image.crop((left, top, left + width, top + height))
+
+SCREEN = {}
+
 def resolve():
     selected = resolve_game_display()
     image = screenshot(selected.physical_id)
-    if selected.size and image.size != selected.size:
-        raise RuntimeError(f'Viewport {selected.size} does not match screenshot {image.size}')
+    SCREEN['size'] = image.size
+    region, source = game_region(selected.frame, selected.size, image.width, image.height)
     print(f'[GAME] {DEVICE} input={selected.logical_id} screenshot={selected.physical_id} '
-          f'port={selected.port} resolution={image.width}x{image.height}', flush=True)
-    return selected.logical_id, selected.physical_id, image
+          f'port={selected.port} screen={image.width}x{image.height} '
+          f'game area={region[2]}x{region[3]} at ({region[0]}, {region[1]}) [{source}]', flush=True)
+    return selected.logical_id, selected.physical_id, crop(image, region), region
 
 class Picker:
     def __init__(self):
@@ -37,6 +48,7 @@ class Picker:
         self.image = None
         self.tk_image = None
         self.rect = (0, 0, 1, 1)
+        self.region = (0, 0, 1, 1)
         self.running = True
         self.busy = False
         self.taps = tk.BooleanVar(value=False)
@@ -78,10 +90,10 @@ class Picker:
         try:
             if detect:
                 reconnect()
-                logical, physical, image = resolve()
-                self.events.put(('detected', logical, physical, image))
+                logical, physical, image, region = resolve()
+                self.events.put(('detected', logical, physical, image, region))
             else:
-                self.events.put(('frame', screenshot(self.physical)))
+                self.events.put(('frame', crop(screenshot(self.physical), self.region)))
         except Exception as exc:
             self.events.put(('error', str(exc)))
         finally:
@@ -93,8 +105,8 @@ class Picker:
                 event = self.events.get_nowait()
                 kind = event[0]
                 if kind == 'detected':
-                    _, self.logical, self.physical, self.image = event
-                    self.status.set(f'Input display {self.logical} | Capture {self.physical} | {self.image.width}x{self.image.height}')
+                    _, self.logical, self.physical, self.image, self.region = event
+                    self.status.set(f'Input display {self.logical} | Capture {self.physical} | game area {self.image.width}x{self.image.height} at ({self.region[0]}, {self.region[1]})')
                     self.draw()
                 elif kind == 'frame':
                     self.image = event[1]
@@ -132,19 +144,20 @@ class Picker:
             return
         x = min(self.image.width - 1, round((event.x - left) * self.image.width / w))
         y = min(self.image.height - 1, round((event.y - top) * self.image.height / h))
-        rx = round(x * REFERENCE_W / self.image.width)
-        ry = round(y * REFERENCE_H / self.image.height)
+        rx, ry = (round(v) for v in to_reference(x, y, self.image.width, self.image.height))
         line = f'Device ({x}, {y}) | Project reference ({rx}, {ry})'
         self.coords.set(line)
         print(f'[COORD] {line} | "point_name": ({rx}, {ry}),', flush=True)
         if self.taps.get():
             logical = self.logical
             def send():
-                result = adb('shell', 'input', '-d', str(logical), 'tap', str(x), str(y))
+                sx, sy = x + self.region[0], y + self.region[1]
+                flag = [] if str(logical) in ('', '0', 'None') else ['-d', str(logical)]
+                result = adb('shell', 'input', *flag, 'tap', str(sx), str(sy))
                 if result.returncode:
                     print('[TAP ERROR]', result.stderr.decode(errors='replace'), flush=True)
                 else:
-                    print(f'[TAP] display={logical} x={x} y={y}', flush=True)
+                    print(f'[TAP] display={logical} x={sx} y={sy}', flush=True)
             threading.Thread(target=send, daemon=True).start()
 
     def run(self):

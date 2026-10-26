@@ -1,14 +1,8 @@
 import time
 import cv2
+from api.common.layout import scale, to_pixels
 
 class ToggleDetector:
-    """A button with a dot that is yellow when on and white when off (auto, ninjutsu, ...).
-
-    point  the button's tap point
-    dot    where the dot is, relative to ``point``
-    tap    name of the point to tap to flip it
-    """
-
     def __init__(self, point, tap, group, label, dot=(0, 0), reference_size=(1145, 2011),
                  confirmations=3, cooldown=1.0):
         self.point = point
@@ -29,13 +23,15 @@ class ToggleDetector:
 
     def box(self, frame):
         height, width = frame.shape[:2]
-        rw, rh = self.reference_size
+        sx, sy = scale(width, height, self.reference_size)
 
-        x = round((self.point[0] + self.dot[0]) * width / rw)
-        y = round((self.point[1] + self.dot[1]) * height / rh)
+        # the button's own position follows the screen layout; the dot's offset from it only scales
+        cx, cy = to_pixels(self.point, width, height, ref=self.reference_size)
+        x = round(cx + self.dot[0] * sx)
+        y = round(cy + self.dot[1] * sy)
 
-        rx = max(1, round(25 * width / rw))
-        ry = max(1, round(20 * height / rh))
+        rx = max(1, round(25 * sx))
+        ry = max(1, round(20 * sy))
 
         return max(0, x - rx), max(0, y - ry), min(width, x + rx), min(height, y + ry)
 

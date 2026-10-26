@@ -57,12 +57,53 @@ function Ensure-Uv {
     if (-not (Test-Path $uv)) { throw 'uv.exe missing from downloaded archive.' }
 }
 
+function Test-PythonRuns {
+    if (-not (Test-Path -LiteralPath $python)) { return $false }
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $python -c 'import sys' 2>$null
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+}
+
+# A venv remembers the absolute path of the Python it was built from (pyvenv.cfg).
+# Renaming or moving the install folder leaves that path dead. The packages inside
+# the venv are fine, so point it at the Python that now sits in this folder.
+# If that doesn't work, throw the venv away; Ensure-Python rebuilds it.
+function Repair-Venv {
+    if (-not (Test-Path -LiteralPath $venv)) { return }
+    if (Test-PythonRuns) { return }
+    Write-Host '[REPAIR] Python environment is not working; fixing it...' -ForegroundColor Yellow
+    $cfg = Join-Path $venv 'pyvenv.cfg'
+    $base = Get-ChildItem -LiteralPath (Join-Path $root '.runtime\python') -Filter 'python.exe' -File -Recurse -Depth 2 -ErrorAction SilentlyContinue |
+        Where-Object { $_.Directory.Name -like 'cpython-3.12*' } | Select-Object -First 1
+    if ($base -and (Test-Path -LiteralPath $cfg)) {
+        $lines = foreach ($line in [System.IO.File]::ReadAllLines($cfg)) {
+            if ($line -match '^home\s*=') { "home = $($base.DirectoryName)" }
+            elseif ($line -match '^executable\s*=') { "executable = $($base.FullName)" }
+            else { $line }
+        }
+        [System.IO.File]::WriteAllLines($cfg, [string[]]$lines, [System.Text.UTF8Encoding]::new($false))
+        if (Test-PythonRuns) { Write-Host '[REPAIR] Fixed.' -ForegroundColor Green; return }
+    }
+    Write-Host '[REPAIR] Rebuilding the Python environment.' -ForegroundColor Yellow
+    Remove-Item -LiteralPath $venv -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 function Ensure-Python {
     Ensure-Uv
-    if (-not (Test-Path $python)) {
+    Repair-Venv
+    if (-not (Test-PythonRuns)) {
+        # leftovers of an interrupted install would confuse uv
+        if (Test-Path -LiteralPath $venv) { Remove-Item -LiteralPath $venv -Recurse -Force }
         Write-Host '[SETUP] Installing isolated Python 3.12.15' -ForegroundColor Cyan
         Invoke-Checked $uv @('venv', '--python', '3.12.15', '--python-preference', 'only-managed', $venv)
-        if (-not (Test-Path $python)) { throw 'Python environment creation did not produce python.exe.' }
+        if (-not (Test-PythonRuns)) { throw 'Python environment creation did not produce a working python.exe.' }
     }
 }
 
@@ -225,8 +266,24 @@ function Read-State {
     try { return Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json } catch { return $null }
 }
 
+# SETUP_REVISION in src\config.py says what this release needs installed. Installs that
+# predate it count as revision 1.
+function Get-SetupRevision {
+    $config = Join-Path $root 'src\config.py'
+    if (Test-Path -LiteralPath $config) {
+        $match = [regex]::Match((Get-Content -LiteralPath $config -Raw), '(?m)^SETUP_REVISION\s*=\s*(\d+)')
+        if ($match.Success) { return [int]$match.Groups[1].Value }
+    }
+    return 1
+}
+
+function Get-StateRevision($State) {
+    if ($State -and $State.revision) { return [int]$State.revision }
+    return 1
+}
+
 function Save-State([string]$Backend, [string]$Profile) {
-    @{ backend=$Backend; profile=$Profile; version=4 } | ConvertTo-Json |
+    @{ backend=$Backend; profile=$Profile; version=4; revision=(Get-SetupRevision) } | ConvertTo-Json |
         Set-Content -LiteralPath $statePath -Encoding UTF8
 }
 
@@ -255,8 +312,9 @@ try {
             if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
         }
     } else {
+        Repair-Venv
         $state = Read-State
-        if ($state -and $state.version -eq 4 -and $state.backend -eq 'auto' -and (Test-CoreSetup $backend)) { exit 0 }
+        if ($state -and $state.version -eq 4 -and $state.backend -eq 'auto' -and (Get-StateRevision $state) -ge (Get-SetupRevision) -and (Test-CoreSetup $backend)) { exit 0 }
 
         Write-Host ''
         Write-Host '=== BLAZING AUTOMATION INSTALLER ===' -ForegroundColor Cyan

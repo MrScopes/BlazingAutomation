@@ -4,8 +4,8 @@ cd /d "%~dp0"
 set "APP=%~dp0app"
 set "PY=%APP%\.venv\Scripts\python.exe"
 
-rem first run or damaged install: set everything up, then carry on
-if exist "%PY%" if exist "%APP%\.setup.json" goto launch
+rem first run, moved folder or damaged install: set everything up (or repair it), then carry on
+if exist "%APP%\.setup.json" if exist "%PY%" "%PY%" -c "import sys" >nul 2>&1 && goto launch
 powershell -NoProfile -ExecutionPolicy Bypass -File "%APP%\scripts\setup.ps1"
 if errorlevel 2 exit /b 0
 if errorlevel 1 (pause & exit /b 1)

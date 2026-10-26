@@ -1,18 +1,23 @@
 import re
 import time
-from .config import REFERENCE_W, REFERENCE_H, adb, reconnect
+from .config import adb, reconnect
+from .common.layout import to_pixels
 
-def send_taps(display, point, size=None, count=1, silent=False, delay_ms=150):
+def display_args(display):
+    # the default display needs no -d (and older Android's input command has no such option)
+    return [] if display in (None, "", 0, "0") else ["-d", str(display)]
+
+def send_taps(display, point, size=None, count=1, silent=False, delay_ms=150, origin=(0, 0), anchor=None):
+    # size = the game area in device pixels, origin = its top-left corner on the display
     x, y = point
     if size is not None:
-        w, h = size
-        x = x * w / REFERENCE_W
-        y = y * h / REFERENCE_H
+        x, y = to_pixels(point, *size, anchor=anchor)
+        x, y = x + origin[0], y + origin[1]
     x, y = round(x), round(y)
     if delay_ms < 0:
         raise ValueError("delay_ms must be nonnegative")
     for i in range(count):
-        result = adb("shell", f"input -d {display} tap {x} {y}")
+        result = adb("shell", " ".join(["input", *display_args(display), "tap", str(x), str(y)]))
         if result.returncode:
             raise RuntimeError(result.stderr.decode(errors="replace"))
         if i + 1 < count:
@@ -26,22 +31,26 @@ class Macro:
         self.capture_mode = capture
         self._driver = None
         self._size = None
+        self._origin = (0, 0)
 
     def connect(self):
-        from .display import game_window
-        self.input_display, self._size = game_window()
+        from .display import game_window_info
+        self.input_display, self._size, frame = game_window_info()
+        if frame:
+            self._origin = (max(0, frame[0]), max(0, frame[1]))
+            self._size = (frame[2] - frame[0], frame[3] - frame[1])
         print(f"[INPUT] Game display {self.input_display}", flush=True)
         return self
 
     def tap(self, point, silent=False, reference=True):
         if self.input_display is None:
             self.connect()
-        send_taps(self.input_display, point, self.size() if reference else None, 1, silent)
+        send_taps(self.input_display, point, self.size() if reference else None, 1, silent, origin=self._origin)
 
     def doubletap(self, point, silent=False, reference=True, delay_ms=150):
         if self.input_display is None:
             self.connect()
-        send_taps(self.input_display, point, self.size() if reference else None, 2, silent, delay_ms)
+        send_taps(self.input_display, point, self.size() if reference else None, 2, silent, delay_ms, origin=self._origin)
 
     def wait(self, ms):
         if ms < 0:

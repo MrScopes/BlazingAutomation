@@ -1,6 +1,6 @@
 import cv2
 
-from api.config import REFERENCE_W, REFERENCE_H
+from api.common.layout import box_pixels
 from api.flow import Flow, tap, wait, do, settle, auto_on, until
 from api.recognition.recognition import Screen
 from api.common.flows import story_setup, reward_popups, battle_complete
@@ -79,8 +79,8 @@ flow.on("story_stage_list", tap("top_stage"))
 def top_mission_complete(frame):
     # the chapter's top mission shows a blue 'complete' badge on the left edge
     h, w = frame.shape[:2]
-    region = frame[round(760 * h / REFERENCE_H):round(1020 * h / REFERENCE_H),
-                   0:round(160 * w / REFERENCE_W)]
+    x1, y1, x2, y2 = box_pixels(0, 760, 160, 1020, w, h)
+    region = frame[y1:y2, x1:x2]
     if region.size == 0:
         return None
     mask = cv2.inRange(cv2.cvtColor(region, cv2.COLOR_BGR2HSV), (80, 70, 100), (110, 255, 255))

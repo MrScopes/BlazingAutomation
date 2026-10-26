@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from .config import adb, reconnect
+from .config import adb, reconnect, GAME_REGION
 
 GAME_PACKAGE = "dev.blazingonline.gameapp"
 
@@ -10,8 +10,41 @@ class GameDisplay:
     physical_id: str
     port: int
     size: tuple | None = None
+    frame: tuple | None = None     # (left, top, right, bottom) of the game window on its display
 
-def game_window(package=GAME_PACKAGE):
+FRAME_PATTERNS = (
+    re.compile(r"\bframe=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]"),      # Android 11+:  Frames: parent=.. frame=[l,t][r,b]
+    re.compile(r"\bmFrame=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]"),     # older Android
+)
+
+def window_frame(window):
+    for pattern in FRAME_PATTERNS:
+        match = pattern.search(window)
+        if match:
+            left, top, right, bottom = map(int, match.groups())
+            if right > left and bottom > top:
+                return left, top, right, bottom
+    return None
+
+def game_region(frame, size, shot_w, shot_h):
+    """(left, top, width, height) of the game inside a full-display screenshot, and how it was found.
+
+    The game fills its window (no bars), and on phones the window sits below the status bar. Taps and
+    screenshots are both in full-display pixels, so this rectangle is what turns reference coordinates into
+    real ones. GAME_REGION in config overrides everything."""
+    if GAME_REGION:
+        return tuple(GAME_REGION), "config GAME_REGION"
+    container, source = (0, 0, shot_w, shot_h), "whole screen (window position not reported)"
+    if frame:
+        left, top, right, bottom = frame
+        left, top = max(0, left), max(0, top)
+        right, bottom = min(shot_w, right), min(shot_h, bottom)
+        # tiny or outside the screenshot: those numbers aren't in this display's pixels
+        if right - left >= shot_w * 0.5 and bottom - top >= shot_h * 0.5:
+            container, source = (left, top, right - left, bottom - top), "window frame"
+    return container, source
+
+def game_window_info(package=GAME_PACKAGE):
     reconnect()
     result = adb("shell", "dumpsys", "window", "windows")
     if result.returncode:
@@ -23,10 +56,17 @@ def game_window(package=GAME_PACKAGE):
         if package not in header:
             continue
         match = re.search(r"\bmDisplayId=(\d+)", window)
-        if match and re.search(r"\bisVisible=true\b", window):
+        # older Android (BlueStacks) has no isVisible= line; mViewVisibility=0x0 means visible there
+        visible = re.search(r"\bisVisible=true\b", window) or (
+            "isVisible=" not in window and re.search(r"\bmViewVisibility=0x0\b", window))
+        if visible:
             size = re.search(r"Requested w=(\d+) h=(\d+)", window)
-            return int(match.group(1)), (int(size.group(1)), int(size.group(2))) if size else None
+            return (int(match.group(1)) if match else 0), (int(size.group(1)), int(size.group(2))) if size else None, window_frame(window)
     raise RuntimeError(f"No visible game window for {package}; launch the game first")
+
+def game_window(package=GAME_PACKAGE):
+    logical, size, _ = game_window_info(package)
+    return logical, size
 
 def physical_displays():
     result = adb("shell", "dumpsys", "SurfaceFlinger", "--display-id")
@@ -60,13 +100,20 @@ def display_viewports():
     return mapping
 
 def resolve_game_display(package=GAME_PACKAGE):
-    logical, size = game_window(package)
-    mapping = display_viewports()
+    logical, size, frame = game_window_info(package)
+    try:
+        mapping = display_viewports()
+    except RuntimeError:
+        mapping = {}       # BlueStacks and other older Android builds don't report viewports
     if logical not in mapping:
-        raise RuntimeError(f"No active physical viewport for game logical display {logical}; available={sorted(mapping)}")
+        if mapping and logical != 0:
+            raise RuntimeError(f"No active physical viewport for game logical display {logical}; available={sorted(mapping)}")
+        # one display: everything (screenshots, taps, video) uses the default
+        print("[GAME] Android reports no display mapping; using the default display", flush=True)
+        return GameDisplay(logical, "", 0, size, frame)
     physical, port = mapping[logical]
     # cross-check with SurfaceFlinger instead of inferring from image size.
     sf = dict(physical_displays())
     if physical not in sf or sf[physical] != port:
         raise RuntimeError(f"SurfaceFlinger mapping mismatch for logical {logical}: physical={physical}, port={port}")
-    return GameDisplay(logical, physical, port, size)
+    return GameDisplay(logical, physical, port, size, frame)
