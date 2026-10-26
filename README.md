@@ -32,7 +32,7 @@ The first run sets everything up for you (Python, OCR, scrcpy, ADB and FFmpeg). 
 You must enable ADB. **BlueStacks Settings -> Advanced -> Android Debug Bridge**
 
 # Mumu
-works out the box
+You must enable ADB. **Device Settings -> Developer Options -> ADB Debug: Enable local connection**
 
 # Android Phone
 you must enable debugging in developer options in the phone, then you can select android phone as an option to run the macros on
