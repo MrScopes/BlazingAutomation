@@ -9,6 +9,7 @@ Current behavior:
 - Ninja road: quit and retry on wave 13 (~1 million currency per 8 hours tested with meta team). Ninja Road macro will stop working 11/1
 - Phantom Castle: automatically play the weakest opponent, and keep playing. acknowledges pearls for stamina, etc. (assuming auto pearl is on)
 - Story: normal/hard choice. will play and go to the next chapter for you for the completion reward (15 pearls). will not/can't do missions for the 3 pearls
+
 Macros can be started on any screen but they will fail for example if you start infinite macro and you're in ninja road, or if you try to have it
 navigate on the home screen, but it's not started where "Story&Gaiden" is the mode in the middle. Updates will be pushed to make these less fragile.
 
