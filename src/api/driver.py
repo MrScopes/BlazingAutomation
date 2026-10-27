@@ -96,6 +96,21 @@ class Driver:
               flush=True)
         return frame
 
+    def latest_frame(self):
+        if self.live is None:
+            return None
+        try:
+            return self.crop(self.live.get())
+        except Exception:
+            return None
+
+    def back(self):
+        if self.input_display is None:
+            self.find_display()
+        result = adb("shell", " ".join(["input", *display_args(self.input_display), "keyevent", "4"]))
+        if result.returncode:
+            raise RuntimeError(result.stderr.decode(errors="replace"))
+
     def crop(self, frame):
         # screenshots and live video cover the whole display; macros only see the game area
         if self.region is None or self.screen_size is None:

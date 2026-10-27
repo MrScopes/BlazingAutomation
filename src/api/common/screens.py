@@ -41,6 +41,10 @@ COMMON_SCREENS = [
             "farthest point",
             "total map completion reward",
             "game data updated",
+            # pages opened from the bottom bar still show it, but they are not Home
+            "character list",
+            "back shop",
+            "inventory",
         ),
         min_hits=1),
 

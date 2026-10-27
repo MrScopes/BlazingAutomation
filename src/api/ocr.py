@@ -1,4 +1,5 @@
 import os
+import time
 import cv2
 import onnxruntime as ort
 from rapidocr import RapidOCR
@@ -18,6 +19,13 @@ class OCR:
             "EngineConfig.onnxruntime.use_dml": use_dml
         })
         print(f"[OCR] RapidOCR ONNX Runtime ({self.backend})", flush=True)
+        # testing only: BLAZING_OCR_DELAY_MS=3000 makes every read take 3 seconds longer, like a slow machine
+        try:
+            self.delay = max(0, int(os.environ.get("BLAZING_OCR_DELAY_MS", "0") or 0)) / 1000
+        except ValueError:
+            raise ValueError(f"Invalid BLAZING_OCR_DELAY_MS: {os.environ['BLAZING_OCR_DELAY_MS']!r} (use whole milliseconds)")
+        if self.delay:
+            print(f"[OCR] Test delay: every read takes {self.delay * 1000:.0f} ms longer", flush=True)
 
     @staticmethod
     def preprocess(frame):
@@ -34,6 +42,8 @@ class OCR:
 
     def read(self, frame):
         result = self.detect(frame)
+        if self.delay:
+            time.sleep(self.delay)
         self.items = self.boxes(result, frame)
         return self.text(result)
 

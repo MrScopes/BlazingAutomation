@@ -1,3 +1,5 @@
+import re
+
 class HomeNavigation:
     AWAY_RESET = 5.0     # seconds of unrecognised screens after which Home selection starts over
 
@@ -5,6 +7,8 @@ class HomeNavigation:
         self.steps = tuple(steps)
         self.destination = set(destination if isinstance(destination, (tuple, list, set)) else (destination,))
         self.retry_seconds = retry_seconds
+        self.failures = 0
+        self.last_back = float('-inf')
         self.reset()
 
     def reset(self):
@@ -15,14 +19,23 @@ class HomeNavigation:
 
     def handle(self, engine, screen, now):
         if screen in self.destination:
+            self.failures = 0
             self.reset()
             return False
         if screen == 'unknown':
             # a carousel sliding or a screen fading: not a reason to forget which steps are done
             if self.away_since is None:
                 self.away_since = now
+            elif now - self.away_since > 6 and now - self.last_back > 6:
+                # stuck on a page the macro does not know (Shop, Character List...): a Back button means we can leave it
+                tick = getattr(engine, 'tick', None)
+                if tick is not None and re.search(r'\bback\b', tick.raw, re.I):
+                    self.last_back = now
+                    print('[NAV] Unknown page with a Back button; pressing Back', flush=True)
+                    engine.driver.back()
             return False
         if screen != 'home':
+            self.failures = 0
             self.reset()
             return False
         if self.away_since is not None:
@@ -33,8 +46,14 @@ class HomeNavigation:
             return False
         if self.waiting_since is not None:
             if now - self.waiting_since >= self.retry_seconds:
+                self.failures += 1
                 print('[NAV] Mode did not open; retrying Home selection', flush=True)
                 self.reset()
+                # the real Home has no Back button, so a Back on screen means a page opened by mistake
+                tick = getattr(engine, 'tick', None)
+                if self.failures >= 2 and tick is not None and re.search(r'\bback\b', tick.raw, re.I):
+                    print('[NAV] This is not the Home screen (it has a Back button); pressing Back', flush=True)
+                    engine.driver.back()
             return True
         if self.index >= len(self.steps):
             self.waiting_since = now
