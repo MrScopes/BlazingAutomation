@@ -1,7 +1,7 @@
 import re
 
 from api.flow import Flow, START_MODE
-from api.runtime.ninjutsu import NINJUTSU_POINTS, apply as set_ninjutsu
+from api.runtime.ninjutsu import NINJUTSU_POINTS, SECRET_POINTS, ninjutsu as ninjutsu_button, secret as secret_button, apply as set_ninjutsu, apply_secret as set_secret
 from api.recognition.recognition import Screen
 
 # the three taps that finish a fight and get back to the menu
@@ -24,7 +24,11 @@ flow = Flow(
         "opponent_3": (865, 1648),
         "stamina_yes": (744, 1336),
         "stamina_ok": (562, 1092),
+        # this fight screen has no MENU button, so AUTO sits where MENU is in the other macros
+        # (the shared point is the x3 speed button here, its orange dot reads as Auto being on)
+        "auto_button": (998, 69),
         **NINJUTSU_POINTS,
+        **SECRET_POINTS,
         "finish_a": (571, 1635),
         "finish_b": (595, 1053),
         "finish_c": (851, 1296),
@@ -59,10 +63,13 @@ flow = Flow(
             min_hits=1),
 
         # the fight itself
+        # before Auto is on the only text is the AUTO button, the enemy name ("Ghost of ...") and the health numbers;
+        # the Ninjutsu and Secret labels only show up once Auto is on, so they cannot be required
         Screen("phantom_castle_battle",
-            phrases=("auto play", "autoplay", "latent techniques", "skill", "ghost of"),
-            required=("ninjutsu", "secret"),
-            negative=("mission complete", "points earned"),
+            phrases=("ghost of", "auto play", "autoplay", "latent techniques", "ninjutsu", "secret", "skill"),
+            required=("auto",),
+            negative=("mission complete", "points earned", "field effects", "opponent update", "team setup",
+                      "recover pc stamina", "stamina restored"),
             min_hits=1),
 
         # points counting up after the win
@@ -132,6 +139,20 @@ flow.count_run(on="phantom_castle_menu", after="phantom_castle_battle")
 # seconds between finish taps
 FINISH_GAP = 0.2
 
+# taps on one button before we stop trying it, so a wrong spot is not hammered all fight
+MAX_BUTTON_TAPS = 3
+
+def try_set(ctx, name, detector, setter, want):
+    tries = ctx.run.setdefault("tries", {})
+    before = detector.last_tap
+    done = setter(ctx, want)
+    if detector.last_tap != before:
+        tries[name] = tries.get(name, 0) + 1
+    if not done and tries.get(name, 0) >= MAX_BUTTON_TAPS:
+        ctx.log(f"{name.title()} did not change after {MAX_BUTTON_TAPS} taps; leaving it as it is")
+        return True
+    return done
+
 # fights can take a while so the battle has a long limit
 @flow.rule("phantom_castle_battle", timeout=600)
 def battle(ctx):
@@ -140,9 +161,11 @@ def battle(ctx):
     if not ctx.run.get("auto") and not ctx.run.get("victory") and ctx.auto_on():
         ctx.run["auto"] = True
         ctx.log("Auto confirmed ON")
-    # once auto is on turn ninjutsu on too and log when it is confirmed
-    if ctx.run.get("auto") and not ctx.run.get("ninjutsu") and not ctx.run.get("victory"):
-        if set_ninjutsu(ctx, "on"):
+    # once auto is on make sure secret techniques are off, then ninjutsu on, so only jutsu is used
+    if ctx.run.get("auto") and not ctx.run.get("victory"):
+        if not ctx.run.get("secret") and try_set(ctx, "secret", secret_button, set_secret, "off"):
+            ctx.run["secret"] = True
+        if ctx.run.get("secret") and not ctx.run.get("ninjutsu") and try_set(ctx, "ninjutsu", ninjutsu_button, set_ninjutsu, "on"):
             ctx.run["ninjutsu"] = True
 
     # the big Victory or Defeat banner shows on the fight screen
@@ -170,4 +193,3 @@ def finish(ctx):
     if ctx.tap(FINISH[n % len(FINISH)]):
         run["finish_i"] = n + 1
         run["finish_at"] = ctx.now
-        

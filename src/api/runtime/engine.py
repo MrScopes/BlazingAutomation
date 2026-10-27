@@ -52,7 +52,7 @@ class MacroEngine:
 
     def stale(self):
         tick = self.tick
-        if tick is None or tick.screen == "battle":            # battles animate all the time
+        if tick is None or tick.screen == "battle" or tick.screen.endswith("_battle"):    # battles animate all the time
             return False
         fresh = self.driver.latest_frame() if hasattr(self.driver, "latest_frame") else None
         if fresh is None or fresh.shape != tick.frame.shape:
@@ -146,3 +146,4 @@ class MacroEngine:
                 return
 
             time.sleep(self.poll)
+            
