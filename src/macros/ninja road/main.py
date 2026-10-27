@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import cv2
+
 from api.flow import Flow, NEVER, wait, tap, do, until
 from api.recognition.recognition import Screen
 from api.common.flows import battle_complete, reward_pages
@@ -109,10 +111,22 @@ def mark(ctx):
 
 def dialog_ready(ctx):
     # go on once the are you sure box is read or after 4 seconds so a bad read never blocks us
-    return "are you sure" in ctx.raw.lower() or ctx.now - ctx.run["retreat"]["menu_at"] > 4
+    if "are you sure" in ctx.raw.lower():
+        return True
+    if ctx.now - ctx.run["retreat"]["menu_at"] > 4:
+        ctx.log("Retreat box not read after 4 seconds; confirming anyway")
+        return True
+    return False
 
 # retreat steps are menu then retreat then wait for the box then confirm
 RETREAT = [wait(1), tap("battle_menu"), wait(1), tap("retreat_button"), do(mark), until(dialog_ready), tap("retreat_confirm")]
+# the menu only has Retreat once Ready has been pressed, so from the team select screen press Ready first
+RETREAT_FROM_READY = [tap("ready"), wait(2), *RETREAT]
+
+def waiting_for_ready(ctx):
+    # the team select screen is showing and we did not just press Ready (that screen can linger a moment)
+    raw = ctx.raw.lower()
+    return "select a team" in raw and "ready" in raw and ctx.now - ctx.run.get("ready_at", float("-inf")) > 3
 
 # runs on every screen because the retreat menu is not read as battle
 @flow.always
@@ -128,18 +142,21 @@ def retreat(ctx):
             ctx.fail(f"Retreat did not leave the battle after {RETREAT_TRIES} tries")
         state["tries"] += 1
         state["active"], state["done_at"] = True, None
+        state["steps"] = RETREAT_FROM_READY if waiting_for_ready(ctx) else RETREAT
         run.get("_plays", {}).pop("retreat", None)
-        ctx.log(f"Retreat try {state['tries']}/{RETREAT_TRIES}")
+        ctx.log(f"Retreat try {state['tries']}/{RETREAT_TRIES} ({'press Ready first' if state['steps'] is RETREAT_FROM_READY else 'menu'})")
 
     # run the steps and note when the last tap went out
     if state["done_at"] is None:
-        if ctx.play("retreat", RETREAT):
+        if ctx.play("retreat", state["steps"]):
             state["done_at"] = ctx.now
         return
 
     # still fighting a while after the confirm so the retreat missed and we try again
     if ctx.screen == "battle" and ctx.now - state["done_at"] > RETREAT_CHECK:
-        ctx.log("Still in battle after retreat; trying again")
+        path = f"ninja_road_retreat_{state['tries']}.png"
+        cv2.imwrite(path, ctx.frame)
+        ctx.log(f"Still in battle after retreat; trying again (screenshot {path}; OCR: {ctx.raw[:120]!r})")
         state["active"] = False
 
 # runs again and again while in battle with no time limit
@@ -176,6 +193,7 @@ def battle(ctx):
     # press ready once per wave and use the first ready button in wave 1
     if wave.current not in ready and ctx.tap("initial_ready" if wave.current == 1 else "ready", spacing=0.5):
         ready.add(wave.current)
+        run["ready_at"] = ctx.now
 
         if wave.current >= RETREAT_WAVE:
             run["retreating"] = True
