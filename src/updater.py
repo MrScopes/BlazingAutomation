@@ -22,6 +22,7 @@ MAX_UNPACKED_BYTES = 250 * 1024 * 1024
 VERSION_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$", re.I)
 
 LAUNCHERS = {"Run.bat"}
+DOCS = {"README.md"}                                      # shipped at the top of the release; kept up to date, never required
 OLD_LAUNCHERS = {"Install.bat", "Developer.bat"}        # replaced by the launcher menu; offered for deletion
 IGNORED_DIRS = {"__pycache__", ".git", ".venv", ".runtime", ".bootstrap", ".cache", "tools", "models"}
 IGNORED_SUFFIXES = {".pyc", ".pyo", ".log", ".tmp", ".bak"}
@@ -64,7 +65,7 @@ def managed(name):
         return False
     if Path(parts[-1]).suffix.lower() in IGNORED_SUFFIXES:
         return False
-    return name in LAUNCHERS or (len(parts) >= 3 and parts[:2] in (["app", "src"], ["app", "scripts"]))
+    return name in LAUNCHERS or name in DOCS or (len(parts) >= 3 and parts[:2] in (["app", "src"], ["app", "scripts"]))
 
 def safe_files(zf):
     files = {}
@@ -186,7 +187,7 @@ def check_update():
 def local_managed_files():
     result = {}
 
-    for launcher in LAUNCHERS | OLD_LAUNCHERS:
+    for launcher in LAUNCHERS | OLD_LAUNCHERS | DOCS:
         path = INSTALLER / launcher
         if path.is_file():
             result[launcher] = path

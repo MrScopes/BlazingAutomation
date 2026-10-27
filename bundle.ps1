@@ -15,6 +15,9 @@ $configText = Get-Content -LiteralPath $configPath -Raw
 $versionMatch = [regex]::Match($configText, '(?m)^\s*VERSION\s*=\s*["''](?<version>[0-9A-Za-z][0-9A-Za-z._-]*)["'']')
 if (-not $versionMatch.Success) { throw 'Could not find VERSION = "..." in src/config.py' }
 $version = $versionMatch.Groups['version'].Value
+$repoMatch = [regex]::Match($configText, '(?m)^\s*REPO\s*=\s*["''](?<repo>[^"'']+)["'']')
+if (-not $repoMatch.Success) { throw 'Could not find REPO = "..." in src/config.py' }
+$repo = $repoMatch.Groups['repo'].Value
 $zipPath = Join-Path $root "blazingautomation-$version.zip"
 
 if (-not (Test-Path -LiteralPath (Join-Path $source 'main.py') -PathType Leaf)) { throw 'Missing src/main.py' }
@@ -40,6 +43,18 @@ foreach ($name in $scripts) {
 foreach ($name in $launchers) {
     Copy-Item -LiteralPath (Join-Path $packaging "launchers\$name") -Destination (Join-Path $dest $name) -Force
 }
+
+# add README to dist
+$readmeSource = Join-Path $root 'README.md'
+$readmeText = $null
+if (Test-Path -LiteralPath $readmeSource -PathType Leaf) {
+    $body = (Get-Content -LiteralPath $readmeSource -Raw).TrimStart([char]0xFEFF)
+    $readmeText = "# GitHub`n$repo`n`n$body"
+    [System.IO.File]::WriteAllText((Join-Path $dest 'README.md'), $readmeText, [System.Text.UTF8Encoding]::new($false))
+} else {
+    Write-Warning 'README.md not found next to bundle.ps1; the release will not include one.'
+    Remove-Item -LiteralPath (Join-Path $dest 'README.md') -Force -ErrorAction SilentlyContinue
+}
 Write-Host "[BUILD] Installer prepared: $dest (version $version)" -ForegroundColor Green
 
 $stage = Join-Path $root '.bundle-stage'
@@ -51,6 +66,7 @@ try {
     foreach ($name in $launchers) {
         Copy-Item -LiteralPath (Join-Path $dest $name) -Destination (Join-Path $stage $name) -Force
     }
+    if ($readmeText) { Copy-Item -LiteralPath (Join-Path $dest 'README.md') -Destination (Join-Path $stage 'README.md') -Force }
     if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
     Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -CompressionLevel Optimal
     Write-Host "[ZIP] Created $zipPath" -ForegroundColor Green
