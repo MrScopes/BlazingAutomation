@@ -4,7 +4,7 @@ from api.common.layout import scale, to_pixels
 
 class ToggleDetector:
     def __init__(self, point, tap, group, label, dot=(0, 0), reference_size=(1145, 2011),
-                 confirmations=3, cooldown=1.0):
+                 confirmations=3, cooldown=1.0, settle=1.2):
         self.point = point
         self.tap_name = tap
         self.group = group
@@ -13,6 +13,8 @@ class ToggleDetector:
         self.reference_size = reference_size
         self.confirmations = confirmations
         self.cooldown = cooldown
+        # right after a tap the button flashes, so reads in this window are not trusted
+        self.settle = settle
         self.last_tap = 0.0
         self.last_state = None
         self.state_count = 0
@@ -79,6 +81,11 @@ class ToggleDetector:
         return None
 
     def check(self, frame):
+        if time.monotonic() - self.last_tap < self.settle:
+            self.last_state = None
+            self.state_count = 0
+            return None
+
         state = self.detect(frame)
 
         if state is None:
@@ -126,6 +133,16 @@ class ToggleDetector:
 
         return False
 
+    def flip(self, engine):
+        # one blind tap, for when the state is already known and a read would be slow or unreliable
+        if engine.tap(self.tap_name, cooldown=self.cooldown, group=self.group):
+            self.last_tap = time.monotonic()
+            self.last_state = None
+            self.state_count = 0
+            print(f"[{self.label.upper()}] Switching {self.label}", flush=True)
+            return True
+        return False
+
     def enable(self, engine):
         return self.set(engine, True)
 
@@ -136,3 +153,4 @@ class AutoDetector(ToggleDetector):
     def __init__(self, point, **kwargs):
         # the auto dot sits 60 to the left of the auto button point
         super().__init__(point, tap="auto_button", group="auto_toggle", label="Auto", dot=(-60, 0), **kwargs)
+        
