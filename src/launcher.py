@@ -144,7 +144,7 @@ def pick_options(name, info, remembered):
         label = flag.lstrip("-").replace("-", " ").capitalize()
         default = remembered.get(flag, option.get("default"))
         if option.get("action") == "store_true":
-            pick = ui.choose(f"{pretty(name)}: {label}", ["No", "Yes"], default=1 if default else 0)
+            pick = ui.choose(f"{pretty(name)}: {label}", ["No", "Yes"], default=1 if default else 0, subtitle=option.get("help") or "")
             if pick is None:
                 return None
             if pick:
@@ -153,7 +153,8 @@ def pick_options(name, info, remembered):
         elif option.get("choices"):
             choices = [str(c) for c in option["choices"]]
             pick = ui.choose(f"{pretty(name)}: {label}", [c.title() for c in choices],
-                             default=choices.index(str(default)) if str(default) in choices else 0)
+                             default=choices.index(str(default)) if str(default) in choices else 0,
+                             subtitle=option.get("help") or "")
             if pick is None:
                 return None
             args += [flag, choices[pick]]
@@ -277,12 +278,12 @@ def device_label(state):
     return "Android Phone" if mode == "phone" else "Emulator"
 
 def ask_device(state):
-    stop = False
+    stop = True                  # the "Stop asking" box starts ticked
     default = 1 if state.get("device_mode") == "phone" else 0
     while True:
         ui.clear()
         pick = ui.choose("Where is the game running?",
-                         ["Emulator", "Android Phone", f"[{'x' if stop else ''}] Stop asking (You can change this later.)"],
+                         ["Emulator", "Android Phone", f"[{'x' if stop else ''}] Stop asking? You can change this later."],
                          default=default, subtitle="Pick one to start, or tick the box first to remember the choice")
         if pick is None:
             return False
@@ -300,7 +301,7 @@ def ask_device(state):
 
 def set_emulator_address(state):
     ui.clear()
-    ui.header("Emulator address", "Usually 127.0.0.1:5555 (BlueStacks) or 127.0.0.1:16384 (MuMu 12). See your emulator's settings")
+    ui.header("Emulator address", "Usually 127.0.0.1:5555")
     value = ui.ask("ADB address", state.get("device") or DEFAULT_DEVICE, valid_device)
     state["device"] = "" if value == DEFAULT_DEVICE else value
     save_state(state)
@@ -320,7 +321,7 @@ def find_phone(state):
 
 def prepare_device(state):
     if not state.get("device_mode") and state.get("device") is not None:
-        state["device_mode"] = "emulator"       
+        state["device_mode"] = "emulator"           # an address saved before phones were supported
     if state.get("ask_device", True) or not state.get("device_mode"):
         if not ask_device(state):
             return None
@@ -367,6 +368,7 @@ def pair_phone():
 
 def settings(state):
     while True:
+        ui.clear()
         asking = state.get("ask_device", True)
         pick = ui.choose("Settings", [f"Verbose log: {'on' if state.get('verbose') else 'off'}",
                                       f"Ask which device to use: {'yes' if asking else 'no'}",
@@ -388,8 +390,6 @@ def settings(state):
         else:
             return
         save_state(state)
-
-# ---------------------------------------------------------------- main menu
 
 def main():
     ui.enable_ansi()
@@ -432,4 +432,3 @@ if __name__ == "__main__":
         sys.exit(main())
     except KeyboardInterrupt:
         print()
-        

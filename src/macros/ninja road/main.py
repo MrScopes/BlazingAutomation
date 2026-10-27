@@ -5,7 +5,7 @@ import cv2
 from api.flow import Flow, NEVER, wait, tap, do, until
 from api.recognition.recognition import Screen
 from api.common.flows import battle_complete, reward_pages
-from api.runtime.ninjutsu import NINJUTSU_POINTS, apply as set_ninjutsu
+from api.runtime.ninjutsu import NINJUTSU_POINTS, SECRET_POINTS, ninjutsu as ninjutsu_button, secret as secret_button, apply as set_ninjutsu, apply_secret as set_secret
 
 # retreat once this wave is ready
 RETREAT_WAVE = 13
@@ -36,9 +36,14 @@ flow = Flow(
         "initial_ready": (544, 1515),
         "ready": (807, 1525),
         "retreat_button": (331, 1195),
-        "retreat_confirm": (800, 980),
+        # the Retreat button on the team select screen, left of Ready
+        "retreat_planning": (302, 1518),
+        "retreat_confirm": (802, 982),
         "results_next": (582, 1910),
+        # OK on the box that says Ninja Road is closing
+        "closed_ok": (566, 1000),
         **NINJUTSU_POINTS,
+        **SECRET_POINTS,
     },
 
     screens=[
@@ -57,6 +62,12 @@ flow = Flow(
         Screen("ninja_road_reward_3",
             required=("ninja road", "rare map completion reward", "final results"),
             min_hits=0),
+
+        # the game closes Ninja Road when no team is left to fight with, this is the OK box
+        Screen("ninja_road_closed",
+            phrases=("all teams defeated", "no teams ready to participate"),
+            required=("closing ninja road",),
+            min_hits=1),
 
         # menu with the challenge button
         Screen("ninja_road_challenge",
@@ -78,7 +89,8 @@ flow = Flow(
         "home": ("ninja_road_challenge",),
         "ninja_road_challenge": ("select_ninja_road_team",),
         "select_ninja_road_team": ("battle",),
-        "battle": ("battle_complete",),
+        "battle": ("battle_complete", "ninja_road_closed"),
+        "ninja_road_closed": ("home", "ninja_road_challenge"),
         "battle_complete": ("ninja_road_reward_1",),
         "ninja_road_reward_1": ("ninja_road_reward_2",),
         "ninja_road_reward_2": ("ninja_road_reward_3",),
@@ -90,6 +102,8 @@ flow = Flow(
 flow.on("ninja_road_challenge", "challenge", every=5)
 # on team select tap start mission and retry every 5 seconds
 flow.on("select_ninja_road_team", "start_mission", every=5)
+# when the game closes Ninja Road tap OK to go back to a known screen
+flow.on("ninja_road_closed", "closed_ok", every=2)
 
 # after the battle
 # on mission complete tap continue
@@ -101,8 +115,8 @@ reward_pages(flow, RESULT_PAGES, every=2.0, gap=0.4, delay=1.5, timeout=30)
 # count one run when we are back on the challenge menu after the results
 flow.count_run(on="ninja_road_challenge", after=RESULT_PAGES)
 
-# how many times to try the retreat before giving up loudly
-RETREAT_TRIES = 4
+# keep trying the retreat for as long as we are still in the battle (only a screenshot is saved for the first few)
+RETREAT_SHOTS = 5
 # if still in battle this many seconds after the last confirm tap the retreat did not work
 RETREAT_CHECK = 8
 
@@ -120,13 +134,57 @@ def dialog_ready(ctx):
 
 # retreat steps are menu then retreat then wait for the box then confirm
 RETREAT = [wait(1), tap("battle_menu"), wait(1), tap("retreat_button"), do(mark), until(dialog_ready), tap("retreat_confirm")]
-# the menu only has Retreat once Ready has been pressed, so from the team select screen press Ready first
+# on the team select screen use its own Retreat button, no need to press Ready at all
+RETREAT_PLANNING = [wait(0.5), tap("retreat_planning"), do(mark), until(dialog_ready), tap("retreat_confirm")]
+# fallback: the menu only has Retreat once Ready has been pressed, so press Ready first
 RETREAT_FROM_READY = [tap("ready"), wait(2), *RETREAT]
+# tries with the team select button before falling back to Ready then the menu
+PLANNING_TRIES = 2
+
+def planning(ctx):
+    return "select a team" in ctx.raw.lower()
+
+def pick_steps(ctx, state):
+    if planning(ctx) and state["planning"] < PLANNING_TRIES:
+        state["planning"] += 1
+        return RETREAT_PLANNING, "team select Retreat button"
+    if waiting_for_ready(ctx):
+        return RETREAT_FROM_READY, "press Ready first"
+    return RETREAT, "menu"
 
 def waiting_for_ready(ctx):
     # the team select screen is showing and we did not just press Ready (that screen can linger a moment)
     raw = ctx.raw.lower()
     return "select a team" in raw and "ready" in raw and ctx.now - ctx.run.get("ready_at", float("-inf")) > 3
+
+# the buttons are covered by the Ready screen until Ready is pressed, so they are only set after it
+# last state each button was confirmed in this session; lets the first tap go out the moment Ready is pressed
+KNOWN = {}
+BUTTONS = {"ninjutsu": ninjutsu_button, "secret": secret_button}
+
+def switch_now(ctx, wanted):
+    # a button we know is in the wrong state gets tapped right away, the normal check afterwards confirms it
+    for name, want in wanted.items():
+        if want and KNOWN.get(name) and KNOWN[name] != want:
+            BUTTONS[name].flip(ctx.engine)
+
+# asked at the start: yes uses the wave plan below, no keeps the old behavior (ninjutsu on, secret untouched)
+flow.arg("--new-strategy", action="store_true",
+        help="Saves up to 20 seconds. Only recommended with cheap aoe jutsu units with good range. Wave 1-4: No Jutsu or Secret, Wave 5: Secret Only, Wave 6+: Jutsu Only. Ex: Duo/Eida/Madara")
+
+# wave 5 uses secret techniques, from wave 6 on ninjutsu is back on
+SECRET_WAVE = 5 
+NINJUTSU_WAVE = 6
+
+def wanted_toggles(ctx, wave):
+    # (ninjutsu, secret) for this wave, None leaves that button alone
+    if not ctx.args.new_strategy:
+        return "on", None
+    if wave >= NINJUTSU_WAVE:
+        return "on", "off"
+    if wave == SECRET_WAVE:
+        return "off", "on"
+    return "off", "off"
 
 # runs on every screen because the retreat menu is not read as battle
 @flow.always
@@ -134,17 +192,15 @@ def retreat(ctx):
     run = ctx.run
     if not run.get("retreating"):
         return
-    state = run.setdefault("retreat", {"tries": 0, "active": False, "done_at": None})
+    state = run.setdefault("retreat", {"tries": 0, "planning": 0, "active": False, "done_at": None})
 
     # start a fresh attempt or give up after too many
     if not state["active"]:
-        if state["tries"] >= RETREAT_TRIES:
-            ctx.fail(f"Retreat did not leave the battle after {RETREAT_TRIES} tries")
         state["tries"] += 1
         state["active"], state["done_at"] = True, None
-        state["steps"] = RETREAT_FROM_READY if waiting_for_ready(ctx) else RETREAT
+        state["steps"], how = pick_steps(ctx, state)
         run.get("_plays", {}).pop("retreat", None)
-        ctx.log(f"Retreat try {state['tries']}/{RETREAT_TRIES} ({'press Ready first' if state['steps'] is RETREAT_FROM_READY else 'menu'})")
+        ctx.log(f"Retreat try {state['tries']} ({how})")
 
     # run the steps and note when the last tap went out
     if state["done_at"] is None:
@@ -153,10 +209,14 @@ def retreat(ctx):
         return
 
     # still fighting a while after the confirm so the retreat missed and we try again
-    if ctx.screen == "battle" and ctx.now - state["done_at"] > RETREAT_CHECK:
-        path = f"ninja_road_retreat_{state['tries']}.png"
-        cv2.imwrite(path, ctx.frame)
-        ctx.log(f"Still in battle after retreat; trying again (screenshot {path}; OCR: {ctx.raw[:120]!r})")
+    # the team select screen counts too since the game can land back on it
+    if (ctx.screen == "battle" or "select a team" in ctx.raw.lower()) and ctx.now - state["done_at"] > RETREAT_CHECK:
+        note = ""
+        if state["tries"] <= RETREAT_SHOTS:
+            path = f"ninja_road_retreat_{state['tries']}.png"
+            cv2.imwrite(path, ctx.frame)
+            note = f" (screenshot {path}; OCR: {ctx.raw[:120]!r})"
+        ctx.log(f"Still in battle after retreat; trying again{note}")
         state["active"] = False
 
 # runs again and again while in battle with no time limit
@@ -169,6 +229,8 @@ def battle(ctx):
     # log each new wave
     if wave.changed:
         ctx.log(f"Wave {wave.current}/{wave.total}")
+        # look at the buttons again every wave in case an earlier read was wrong (this does not hold Ready back)
+        run["checked"] = {}
 
     # retreat is running so do nothing else
     if run.get("retreating"):
@@ -179,9 +241,18 @@ def battle(ctx):
         run["auto"] = True
         ctx.log("Auto confirmed ON for wave 1")
 
-    # once auto is on turn ninjutsu on too and keep trying each wave until it is confirmed
-    if run.get("auto") and not run.get("ninjutsu") and set_ninjutsu(ctx, "on"):
-        run["ninjutsu"] = True
+    # once auto is on set the buttons for this wave and keep trying until each is confirmed
+    # secret goes first so it is off before ninjutsu comes on
+    if run.get("auto"):
+        want_ninjutsu, want_secret = wanted_toggles(ctx, wave.current)
+        done = run.setdefault("toggles", {})
+        checked = run.setdefault("checked", {})
+        # only once Ready is pressed for this wave, before that the Ready screen covers the buttons
+        if wave.current in run.get("ready", ()):
+            if want_secret and (done.get("secret") != want_secret or not checked.get("secret")) and set_secret(ctx, want_secret):
+                done["secret"] = checked["secret"] = KNOWN["secret"] = want_secret
+            if want_ninjutsu and (done.get("ninjutsu") != want_ninjutsu or not checked.get("ninjutsu")) and set_ninjutsu(ctx, want_ninjutsu):
+                done["ninjutsu"] = checked["ninjutsu"] = KNOWN["ninjutsu"] = want_ninjutsu
 
     # wait until the ready button has shown on 2 reads
     if ctx.battle.ready_seen < 2:
@@ -190,12 +261,17 @@ def battle(ctx):
     # waves we already pressed ready on
     ready = run.setdefault("ready", set())
 
+    # on the wave we leave from do not press Ready, the retreat handler uses the Retreat button here
+    if wave.current >= RETREAT_WAVE:
+        run["retreating"] = True
+        ctx.log(f"Wave {wave.current} team select; retreating")
+        return
+
     # press ready once per wave and use the first ready button in wave 1
     if wave.current not in ready and ctx.tap("initial_ready" if wave.current == 1 else "ready", spacing=0.5):
         ready.add(wave.current)
         run["ready_at"] = ctx.now
-
-        if wave.current >= RETREAT_WAVE:
-            run["retreating"] = True
-            ctx.log(f"Wave {wave.current} ready; retreating")
-            
+        # switch the buttons the same moment, before the units can use a technique
+        if run.get("auto"):
+            want_ninjutsu, want_secret = wanted_toggles(ctx, wave.current)
+            switch_now(ctx, {"ninjutsu": want_ninjutsu, "secret": want_secret})
