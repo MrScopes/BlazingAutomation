@@ -29,10 +29,11 @@ Macros can be started mid mission as well though, for example you're playing Nin
 The first run sets everything up for you (Python, OCR, scrcpy, ADB and FFmpeg). It's about a 200 MB download and needs around 1 GB free. After that, Run.bat opens the menu right away.
 
 # BlueStacks
-You must enable ADB. **BlueStacks Settings -> Advanced -> Android Debug Bridge**
+You must enable ADB. **BlueStacks Settings -> Advanced -> Android Debug Bridge**\
+*tested on Pie 64 bit*
 
 # Mumu
-You must enable ADB. **Device Settings -> Developer Options -> ADB Debug: Enable local connection**
+You must enable ADB if it's not already enabled. **Device Settings -> Developer Options -> ADB Debug: Enable local connection**
 
 # Android Phone
 you must enable debugging in developer options in the phone, then you can select android phone as an option to run the macros on
