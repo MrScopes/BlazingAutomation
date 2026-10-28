@@ -17,6 +17,8 @@ MACROS = sorted(
 )
 
 def main():
+    from api.cutoff import exit_if_expired
+    exit_if_expired()
     # Find the macro first: each macro declares its own extra options (e.g. story's --difficulty).
     early = argparse.ArgumentParser(add_help=False)
     early.add_argument("--macro", choices=MACROS)

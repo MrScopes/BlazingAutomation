@@ -1,3 +1,9 @@
+# NO LONGER WORKING AS OF Sunday, November 8, 2026 5:00 AM EST
+> Macros & automation tools are now against the rules.
+Some people have taken it to themselves to ruin the fun for others by making the whole game automated, with OCR etc etc, this is unfair for the people that cannot run these programs and miss out, I allowed simple macros to farm stages, but this is too far.
+
+To follow their rules, and protect user accounts, this program automatically checks the time and will not run if it's past the cutoff.
+
 # Blazing Automation
 Macros for Naruto Blazing Rebirth (Blazing:ONLINE) that run on an Android emulator or phone over ADB. They read the screen with OCR and tap for you.
 

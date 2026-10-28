@@ -214,6 +214,12 @@ def start_macro(name, state):
     ui.pause("Press Enter to go back to the menu")
 
 def run_macros(state):
+    from api.cutoff import MESSAGE, expired
+    if expired():
+        ui.clear()
+        ui.say(MESSAGE, "red")
+        ui.pause()
+        return
     names = macro_names()
     if not names:
         ui.say("No macros found in src/macros.", "red")

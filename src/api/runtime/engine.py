@@ -94,7 +94,11 @@ class MacroEngine:
             "game_data_updated",
         }
 
+        from ..cutoff import block
         while True:
+            if block():
+                # the cutoff passed while a macro was running: stop it
+                raise SystemExit(1)
             frame, raw = self.driver.screen()
             now = time.monotonic()
 
