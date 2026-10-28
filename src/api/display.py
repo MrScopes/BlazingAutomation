@@ -113,7 +113,15 @@ def resolve_game_display(package=GAME_PACKAGE):
         return GameDisplay(logical, "", 0, size, frame)
     physical, port = mapping[logical]
     # cross-check with SurfaceFlinger instead of inferring from image size.
-    sf = dict(physical_displays())
+    try:
+        sf = dict(physical_displays())
+    except RuntimeError:
+        sf = {}
     if physical not in sf or sf[physical] != port:
+        if logical == 0:
+            # some emulators and phones list their screen differently (or not at all) in SurfaceFlinger;
+            # the game is on the main display, so the default display is the right one
+            print(f"[GAME] SurfaceFlinger doesn't list display {physical} (port {port}); using the default display", flush=True)
+            return GameDisplay(logical, "", 0, size, frame)
         raise RuntimeError(f"SurfaceFlinger mapping mismatch for logical {logical}: physical={physical}, port={port}")
     return GameDisplay(logical, physical, port, size, frame)

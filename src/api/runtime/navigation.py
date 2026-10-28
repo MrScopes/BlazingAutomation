@@ -1,6 +1,7 @@
 import re
 
 class HomeNavigation:
+    FOLLOW_UP_WINDOW = 3.0   # how long after its due time a follow-up Home tap may still go out on an unread screen
     AWAY_RESET = 5.0     # seconds of unrecognised screens after which Home selection starts over
 
     def __init__(self, steps, destination, retry_seconds=8.0):
@@ -23,6 +24,17 @@ class HomeNavigation:
             self.reset()
             return False
         if screen == 'unknown':
+            if 0 < self.index < len(self.steps) and self.last_tap is not None and self.waiting_since is None:
+                action, delay = self.steps[self.index]
+                since = now - self.last_tap
+                if delay <= since <= delay + self.FOLLOW_UP_WINDOW and engine.tap(action, spacing=0.35):
+                    self.last_tap = engine.actions.global_at
+                    self.index += 1
+                    print(f'[NAV] Home: {action} (screen was still sliding)', flush=True)
+                    if self.index == len(self.steps):
+                        self.waiting_since = self.last_tap
+                    self.away_since = None
+                    return True
             # a carousel sliding or a screen fading: not a reason to forget which steps are done
             if self.away_since is None:
                 self.away_since = now
@@ -68,3 +80,4 @@ class HomeNavigation:
             if self.index == len(self.steps):
                 self.waiting_since = self.last_tap
         return True
+    

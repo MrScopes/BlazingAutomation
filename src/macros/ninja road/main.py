@@ -8,7 +8,7 @@ from api.common.flows import battle_complete, reward_pages
 from api.runtime.ninjutsu import NINJUTSU_POINTS, SECRET_POINTS, ninjutsu as ninjutsu_button, secret as secret_button, apply as set_ninjutsu, apply_secret as set_secret
 
 # retreat once this wave is ready
-RETREAT_WAVE = 13
+RETREAT_WAVE = 16
 # the three result pages after a run
 REWARDS = ("ninja_road_reward_1", "ninja_road_reward_2", "ninja_road_reward_3")
 # the first result page can also be read as mission_results because both match equally
@@ -168,23 +168,41 @@ def switch_now(ctx, wanted):
         if want and KNOWN.get(name) and KNOWN[name] != want:
             BUTTONS[name].flip(ctx.engine)
 
-# asked at the start: yes uses the wave plan below, no keeps the old behavior (ninjutsu on, secret untouched)
-flow.arg("--new-strategy", action="store_true",
-        help="Saves up to 20 seconds. Only recommended with cheap aoe jutsu units with good range. Wave 1-4: No Jutsu or Secret, Wave 5: Secret Only, Wave 6+: Jutsu Only. Ex: Duo/Eida/Madara")
-
-# wave 5 uses secret techniques, from wave 6 on ninjutsu is back on
-SECRET_WAVE = 5 
-NINJUTSU_WAVE = 6
+# the jutsu plan, one wave at a time:
+#   waves 1-4   ninjutsu off, secret off
+#   wave 5      secret only
+#   waves 6-13  ninjutsu only
+#   wave 14     both off
+#   wave 15     secret only
+#   wave 16     retreat (Ready is never pressed on it)
+SECRET_WAVES = (5, 15)
+NINJUTSU_WAVES = range(6, 14)
 
 def wanted_toggles(ctx, wave):
-    # (ninjutsu, secret) for this wave, None leaves that button alone
-    if not ctx.args.new_strategy:
-        return "on", None
-    if wave >= NINJUTSU_WAVE:
-        return "on", "off"
-    if wave == SECRET_WAVE:
+    # (ninjutsu, secret) for this wave
+    if wave in SECRET_WAVES:
         return "off", "on"
+    if wave in NINJUTSU_WAVES:
+        return "on", "off"
     return "off", "off"
+
+# shown once when the macro starts
+TESTED_WITH = (
+    "Tested team:",
+    "  Duo, Madara, Bee",
+    "  Passive healing bench",
+    "  8 minute run",
+)
+intro_shown = False
+
+@flow.always
+def intro(ctx):
+    global intro_shown
+    if intro_shown:
+        return
+    intro_shown = True
+    for line in TESTED_WITH:
+        ctx.log(line)
 
 # runs on every screen because the retreat menu is not read as battle
 @flow.always
@@ -275,3 +293,4 @@ def battle(ctx):
         if run.get("auto"):
             want_ninjutsu, want_secret = wanted_toggles(ctx, wave.current)
             switch_now(ctx, {"ninjutsu": want_ninjutsu, "secret": want_secret})
+            

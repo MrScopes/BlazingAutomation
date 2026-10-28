@@ -1,4 +1,4 @@
-from api.flow import Flow, wait, auto_on, until
+from api.flow import Flow, NEVER, wait, auto_on, until
 from api.runtime.ninjutsu import NINJUTSU_POINTS, apply as set_ninjutsu
 from api.recognition.recognition import Screen
 from api.common.flows import story_setup, reward_popups, battle_complete, reward_pages
@@ -52,11 +52,19 @@ story_setup(flow, every=4)
 reward_popups(flow)
 
 # give the battle 3s to start, then turn auto on, then turn ninjutsu on
-flow.on("infinite_battle", wait(3), auto_on(), until(lambda ctx: set_ninjutsu(ctx, "on")), timeout=900)
+# an Infinite battle lasts as long as the team survives (well past 15 minutes), so it has no time limit
+flow.on("infinite_battle", wait(3), auto_on(), until(lambda ctx: set_ninjutsu(ctx, "on")), timeout=NEVER)
 battle_complete(flow)
 
 # results -> acquired rewards -> Retry
-flow.on("mission_results", "results_next", every=5, timeout=120)
+# a Special Reward box ("will be sent to the Present Box") can sit on top of the results page; its OK has to be
+# pressed first, the Next button underneath does nothing while the box is open
+@flow.rule("mission_results", timeout=120)
+def results(ctx):
+    if "present box" in ctx.raw.lower():
+        ctx.tap("reward_ok", every=1.5)
+    else:
+        ctx.tap("results_next", every=5)
 reward_pages(flow, "acquired_reward", every=3.0, delay=1.0, timeout=120)
 
 # one run = pressing retry brought us back to team select

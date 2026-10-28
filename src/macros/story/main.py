@@ -12,6 +12,8 @@ BACK_SCREENS = (
 )
 
 HOME_ARRIVALS = ("story_mission_list", "story_stage_list", "home")
+# the next mission can open late, so reaching any of these after Mission Complete was tapped is fine too
+NEXT_MISSION = ("helper_friend_request", "select_story_play_style", "select_helper", "select_team", "battle")
 
 flow = Flow(
     "Story",
@@ -31,6 +33,7 @@ flow = Flow(
         "results_next": (570, 1920),
         "next_mission": (932, 1914),
         "back": (105, 355),
+        "helper_ok": (575, 1930),
         **NINJUTSU_POINTS,
     },
     screens=[
@@ -51,6 +54,12 @@ flow = Flow(
             negative=("select mode", "select team", "stamina required", "select style", "mission results",
                       "special reward condition", "ryo earned"),
             min_hits=1),
+
+        Screen("helper_friend_request",
+            phrases=("ninja rank", "level", "helper"),
+            required=("friend requests",),
+            negative=("select a helper", "friend points", "syncable", "select team", "mission results"),
+            min_hits=1),
     ],
     transitions={
         "game_intro_disclaimer": ("game_intro_main",),
@@ -61,7 +70,8 @@ flow = Flow(
         "story_stage_list": ("story_mission_list",),
         "story_mission_list": ("select_story_play_style", "select_helper"),
         "select_story_play_style": ("select_helper",),
-        "select_helper": ("select_team",),
+        "select_helper": ("select_team", "helper_friend_request"),
+        "helper_friend_request": ("select_helper", "select_team"),
         "select_team": ("battle",),
         "battle": ("battle_complete", "mission_results"),
         "battle_complete": ("mission_results", "completion_reward", "first_time_reward"),
@@ -106,6 +116,8 @@ def mission_list(ctx):
 # play style -> helper -> team -> battle -> results
 story_setup(flow, every=12, expect=True)
 reward_popups(flow, every=0.65)
+# the Helper page with Friend Requests: tap OK to carry on
+flow.on("helper_friend_request", "helper_ok", every=2)
 # give the battle 3s to start, then turn auto on, then turn ninjutsu on
 flow.on("battle", wait(3), auto_on(), until(lambda ctx: set_ninjutsu(ctx, "on")))
 battle_complete(flow, every=12)
@@ -114,18 +126,26 @@ flow.on("mission_results", "results_next", every=0.65)
 # acquired rewards: skip the animation, then straight into the next mission
 # if the next mission never opens (nothing left / not enough stamina), leave via Mission Complete and go Home
 REWARD_SETTLE = settle("screen_center", min_s=5, quiet=1.5, max_s=9, every=0.5)
-LEAVE = tap("mission_complete", expect=(HOME_ARRIVALS, 15))
+LEAVE = tap("mission_complete", expect=((*HOME_ARRIVALS, *NEXT_MISSION), 15))
+
+def leave_done(ctx):
+    # only head home when the next mission really did not open
+    if ctx.screen in NEXT_MISSION:
+        ctx.log("Next mission opened")
+    else:
+        ctx.set_mode("return_home")
 
 flow.on("acquired_reward",
         REWARD_SETTLE,
         tap("next_mission"),
         wait(5),
         LEAVE,
-        do(lambda ctx: ctx.set_mode("return_home")))
+        do(leave_done))
 flow.count_run(on="acquired_reward", after=("select_team", "battle", "battle_complete"), label="Mission")
 
 # return home mode: back out of whatever is open, then continue or stop
 flow.on(BACK_SCREENS, tap("back", every=12), mode="return_home")
+flow.on("helper_friend_request", "helper_ok", every=2, mode="return_home")
 flow.on("acquired_reward", REWARD_SETTLE, LEAVE, mode="return_home")
 
 @flow.rule("home", mode="return_home")
@@ -135,4 +155,3 @@ def arrived_home(ctx):
         ctx.stop()
     else:
         ctx.set_mode("main")
-        
