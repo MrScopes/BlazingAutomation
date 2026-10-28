@@ -4,6 +4,8 @@ Some people have taken it to themselves to ruin the fun for others by making the
 
 To follow their rules, and protect user accounts, this program automatically checks the time and will not run if it's past the cutoff.
 
+DO NOT! attempt to bypass this. the current system is designed to be extremely detectable and you will be banned.
+
 # Blazing Automation
 Macros for Naruto Blazing Rebirth (Blazing:ONLINE) that run on an Android emulator or phone over ADB. They read the screen with OCR and tap for you.
 
