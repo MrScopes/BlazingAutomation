@@ -168,30 +168,36 @@ def switch_now(ctx, wanted):
         if want and KNOWN.get(name) and KNOWN[name] != want:
             BUTTONS[name].flip(ctx.engine)
 
-# the jutsu plan, one wave at a time:
-#   waves 1-4   ninjutsu off, secret off
-#   wave 5      secret only
-#   waves 6-13  ninjutsu only
-#   wave 14     both off
-#   wave 15     secret only
-#   wave 16     retreat (Ready is never pressed on it)
-SECRET_WAVES = (5, 15)
-NINJUTSU_WAVES = range(6, 14)
+# seconds after the Ready tap before a Ready screen that is still up counts as a missed tap
+READY_RETRY = 2.5
+# seconds between Auto being confirmed and the first Ready tap
+AUTO_SETTLE = 1.0
+
+# the jutsu plan: auto and ninjutsu are on for every wave except:
+#   wave 13     ninjutsu goes off 7 seconds after Ready was pressed
+#   wave 14     stays off
+#   wave 15     ninjutsu is back on
+#   wave 16     retreat
+# secret techniques are left alone
+JUTSU_OFF_WAVE = 13
+JUTSU_OFF_AFTER = 3
+JUTSU_OFF_UNTIL = 15
 
 def wanted_toggles(ctx, wave):
-    # (ninjutsu, secret) for this wave
-    if wave in SECRET_WAVES:
-        return "off", "on"
-    if wave in NINJUTSU_WAVES:
-        return "on", "off"
-    return "off", "off"
+    # (ninjutsu, secret), None leaves that button alone
+    if wave == JUTSU_OFF_WAVE:
+        since = ctx.now - ctx.run.get("ready_at", ctx.now)
+        return ("off" if since >= JUTSU_OFF_AFTER else "on"), None
+    if JUTSU_OFF_WAVE < wave < JUTSU_OFF_UNTIL:
+        return "off", None
+    return "on", None
 
 # shown once when the macro starts
 TESTED_WITH = (
     "Tested team:",
-    "  Duo, Madara, Bee",
+    "  Duo, Madara, Madara",
     "  Passive healing bench",
-    "  8 minute run",
+    "  7 minute total cycle = ~200k every 7 hours",
 )
 intro_shown = False
 
@@ -257,6 +263,7 @@ def battle(ctx):
     # in wave 1 turn auto on once
     if wave.current == 1 and not run.get("auto") and ctx.auto_on():
         run["auto"] = True
+        run["auto_at"] = ctx.now
         ctx.log("Auto confirmed ON for wave 1")
 
     # once auto is on set the buttons for this wave and keep trying until each is confirmed
@@ -266,10 +273,11 @@ def battle(ctx):
         done = run.setdefault("toggles", {})
         checked = run.setdefault("checked", {})
         # only once Ready is pressed for this wave, before that the Ready screen covers the buttons
+        # a button that was confirmed earlier in this run is not looked at again
         if wave.current in run.get("ready", ()):
-            if want_secret and (done.get("secret") != want_secret or not checked.get("secret")) and set_secret(ctx, want_secret):
+            if want_secret and done.get("secret") != want_secret and set_secret(ctx, want_secret):
                 done["secret"] = checked["secret"] = KNOWN["secret"] = want_secret
-            if want_ninjutsu and (done.get("ninjutsu") != want_ninjutsu or not checked.get("ninjutsu")) and set_ninjutsu(ctx, want_ninjutsu):
+            if want_ninjutsu and done.get("ninjutsu") != want_ninjutsu and set_ninjutsu(ctx, want_ninjutsu):
                 done["ninjutsu"] = checked["ninjutsu"] = KNOWN["ninjutsu"] = want_ninjutsu
 
     # wait until the ready button has shown on 2 reads
@@ -285,6 +293,17 @@ def battle(ctx):
         ctx.log(f"Wave {wave.current} team select; retreating")
         return
 
+    # the Ready tap can be swallowed (the Auto panel was still closing, the screen was changing): when the team
+    # select screen is still up well after the tap, the tap did not work, so press again and look at the buttons again
+    if wave.current in ready and ctx.battle.ready_seen >= 2 and ctx.now - run.get("ready_at", ctx.now) > READY_RETRY:
+        ready.discard(wave.current)
+        run["toggles"], run["checked"] = {}, {}
+        ctx.log("Ready is still showing; pressing it again")
+
+    # give the Auto panel a moment to close before pressing Ready
+    if ctx.now - run.get("auto_at", float("-inf")) < AUTO_SETTLE:
+        return
+
     # press ready once per wave and use the first ready button in wave 1
     if wave.current not in ready and ctx.tap("initial_ready" if wave.current == 1 else "ready", spacing=0.5):
         ready.add(wave.current)
@@ -293,4 +312,3 @@ def battle(ctx):
         if run.get("auto"):
             want_ninjutsu, want_secret = wanted_toggles(ctx, wave.current)
             switch_now(ctx, {"ninjutsu": want_ninjutsu, "secret": want_secret})
-            
