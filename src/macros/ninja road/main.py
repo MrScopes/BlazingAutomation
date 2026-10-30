@@ -247,6 +247,12 @@ def retreat(ctx):
 @flow.rule("battle", timeout=NEVER)
 def battle(ctx):
     wave, run = ctx.wave, ctx.run
+    # "All teams defeated / Closing Ninja Road" opens over the battle screen and the battle behind it keeps the
+    # screen reading as battle, so the box is recognised here: press its OK to go back to a known screen
+    if "closing ninja road" in ctx.raw.lower():
+        if ctx.tap("closed_ok", every=2):
+            ctx.log("All teams defeated; pressing OK")
+        return
     # no wave read yet so do nothing
     if wave.current is None:
         return
@@ -312,3 +318,4 @@ def battle(ctx):
         if run.get("auto"):
             want_ninjutsu, want_secret = wanted_toggles(ctx, wave.current)
             switch_now(ctx, {"ninjutsu": want_ninjutsu, "secret": want_secret})
+            
