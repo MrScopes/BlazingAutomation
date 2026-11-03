@@ -7,8 +7,9 @@ from api.recognition.recognition import Screen
 from api.common.flows import battle_complete, reward_pages
 from api.runtime.ninjutsu import NINJUTSU_POINTS, SECRET_POINTS, ninjutsu as ninjutsu_button, secret as secret_button, apply as set_ninjutsu, apply_secret as set_secret
 
-# retreat once this wave is ready
-RETREAT_WAVE = 16
+# retreat once this wave is ready; the plan below plays waves 1-20, so this is past the last wave (set a lower
+# number to leave early)
+RETREAT_WAVE = 21
 # the three result pages after a run
 REWARDS = ("ninja_road_reward_1", "ninja_road_reward_2", "ninja_road_reward_3")
 # the first result page can also be read as mission_results because both match equally
@@ -27,7 +28,7 @@ flow = Flow(
     # home navigation is done when this screen shows
     destination="ninja_road_challenge",
 
-    expires=(datetime(2026, 11, 1, 11, 0, tzinfo=timezone.utc), "Ninja Road has changed! Wait for updates."),
+    expires=(datetime(2026, 11, 15, 11, 0, tzinfo=timezone.utc), "Ninja Road has changed! Wait for updates."),
 
     points={
         "select_ninja_road": (1021, 1336),
@@ -173,31 +174,40 @@ READY_RETRY = 2.5
 # seconds between Auto being confirmed and the first Ready tap
 AUTO_SETTLE = 1.0
 
-# the jutsu plan: auto and ninjutsu are on for every wave except:
-#   wave 13     ninjutsu goes off 7 seconds after Ready was pressed
-#   wave 14     stays off
-#   wave 15     ninjutsu is back on
-#   wave 16     retreat
-# secret techniques are left alone
-JUTSU_OFF_WAVE = 13
-JUTSU_OFF_AFTER = 3
-JUTSU_OFF_UNTIL = 15
+# the jutsu plan, auto is on for every wave:
+#   waves 1-6    ninjutsu on
+#   waves 7-8    no jutsu at all
+#   wave 9       secret only
+#   waves 10-14  ninjutsu on
+#   wave 15      ninjutsu on, then off x seconds after Ready was pressed
+#   wave 16-17      ninjutsu on, then off x seconds after Ready was pressed
+#   waves 18-20  ninjutsu on
+# secret is off in every wave except 9
+NO_JUTSU_WAVES = (7, 8)
+SECRET_ONLY_WAVE = 9
+# wave: seconds after Ready before ninjutsu goes off
+JUTSU_OFF_AFTER = {15: 20, 16: 10, 17: 6}
 
 def wanted_toggles(ctx, wave):
     # (ninjutsu, secret), None leaves that button alone
-    if wave == JUTSU_OFF_WAVE:
+    if wave in NO_JUTSU_WAVES:
+        return "off", "off"
+    if wave == SECRET_ONLY_WAVE:
+        return "off", "on"
+    if wave in JUTSU_OFF_AFTER:
         since = ctx.now - ctx.run.get("ready_at", ctx.now)
-        return ("off" if since >= JUTSU_OFF_AFTER else "on"), None
-    if JUTSU_OFF_WAVE < wave < JUTSU_OFF_UNTIL:
-        return "off", None
-    return "on", None
+        return ("off" if since >= JUTSU_OFF_AFTER[wave] else "on"), "off"
+    return "on", "off"
 
 # shown once when the macro starts
 TESTED_WITH = (
-    "Tested team:",
-    "  Duo, Madara, Madara",
+    "Recommended team:",
+    "  Duo, 2 greens with aoe",
     "  Passive healing bench",
-    "  7 minute total cycle = ~200k every 7 hours",
+    "",
+    "My team:",
+    " Duo, Green Sasuke, Green Sasori",
+    " 3 Samurai Sakura"
 )
 intro_shown = False
 
@@ -318,4 +328,3 @@ def battle(ctx):
         if run.get("auto"):
             want_ninjutsu, want_secret = wanted_toggles(ctx, wave.current)
             switch_now(ctx, {"ninjutsu": want_ninjutsu, "secret": want_secret})
-            

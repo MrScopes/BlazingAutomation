@@ -65,12 +65,15 @@ def adb(*args, timeout=30):
         check=False,
     )
 
+def _said(result):
+    return (result.stdout + result.stderr).decode(errors="replace").strip() or "no output"
+
 def reconnect():
     result = adb("get-state")
     if result.returncode == 0 and result.stdout.strip() == b"device":
         return
 
-    subprocess.run(
+    connect = subprocess.run(
         [ADB, "connect", DEVICE],
         capture_output=True,
         timeout=15,
@@ -78,5 +81,9 @@ def reconnect():
 
     result = adb("get-state")
     if result.returncode != 0:
-        raise RuntimeError("ADB device unavailable")
+        # say what adb answered, so the cause (unauthorized, offline, refused, version mismatch) is visible
+        raise RuntimeError(
+            f"ADB device unavailable ({DEVICE}). adb: {ADB}. "
+            f"connect said: {_said(connect)!r}; get-state said: {_said(result)!r}"
+        )
     

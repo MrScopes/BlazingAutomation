@@ -18,7 +18,7 @@ flow = Flow(
     home=[("home_right", 0), ("home_selected_mode", 1.0)],
     destination=("weekly_browser", "weekly_list", "weekly_mission_list"),
     # a double tap on the difficulty opens the mission
-    double_tap=("weekly_ss", "weekly_s", "weekly_a"),
+    double_tap=("weekly_scroll", "weekly_ramen", "weekly_rich", "weekly_ss", "weekly_s", "weekly_a"),
     points={
         # the Weekly tab
         "weekly_tab": (251, 456),
