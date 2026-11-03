@@ -273,6 +273,10 @@ def reinstall():
 
 DEFAULT_DEVICE = "127.0.0.1:5555"          # same default as api/config.py
 
+# shown every time the program starts, before the menu
+ADB_WARNING = "WARNING: ADB is being scanned"
+ADB_WARNING_DETAIL = "As of 11/3 at 2 AM EST the game scans for ADB. IF you use this program, you will probably receive a warning on 11/8."
+
 def valid_device(text):
     host, _, port = text.rpartition(":")
     if text and (not host or not port.isdigit() or not 0 < int(port) < 65536 or " " in text):
@@ -401,6 +405,9 @@ def main():
     ui.enable_ansi()
     state = load_state()
     ui.install(state.get("verbose", False))
+    # the warning comes first; Quit is the default choice
+    if not ui.confirm(ADB_WARNING, yes="Use anyway", no="Quit", detail=ADB_WARNING_DETAIL):
+        return 0
     update = UpdateCheck()
     last = 0
 

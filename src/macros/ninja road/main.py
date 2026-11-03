@@ -186,7 +186,7 @@ AUTO_SETTLE = 1.0
 NO_JUTSU_WAVES = (7, 8)
 SECRET_ONLY_WAVE = 9
 # wave: seconds after Ready before ninjutsu goes off
-JUTSU_OFF_AFTER = {15: 20, 16: 10, 17: 6}
+JUTSU_OFF_AFTER = {15: 20, 16: 15, 17: 6}
 
 def wanted_toggles(ctx, wave):
     # (ninjutsu, secret), None leaves that button alone
@@ -206,7 +206,7 @@ TESTED_WITH = (
     "  Passive healing bench",
     "",
     "My team:",
-    " Duo, Green Sasuke, Green Sasori",
+    " Duo, Eida, Green Sasori",
     " 3 Samurai Sakura"
 )
 intro_shown = False
